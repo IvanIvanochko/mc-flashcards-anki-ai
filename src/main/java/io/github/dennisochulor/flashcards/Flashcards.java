@@ -60,7 +60,10 @@ public class Flashcards implements ClientModInitializer {
             FileManager.init();
             QuestionScheduler.reload();
         });
-        ClientLifecycleEvents.CLIENT_STOPPING.register(_ -> QuestionScheduler.close());
+        ClientLifecycleEvents.CLIENT_STOPPING.register(_ -> {
+            QuestionScheduler.close();
+            FileManager.flush(); // config and stats are saved in the background; make sure they're on disk
+        });
 
         KeyMapping.Category keyBindingCategory = KeyMapping.Category.register(Identifier.fromNamespaceAndPath(MOD_ID, "main"));
 

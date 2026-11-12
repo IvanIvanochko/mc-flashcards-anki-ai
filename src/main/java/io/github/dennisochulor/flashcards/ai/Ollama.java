@@ -18,6 +18,9 @@ import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Minimal blocking client for a local Ollama server (https://ollama.com).
@@ -30,6 +33,10 @@ public final class Ollama {
             .build();
     /** Keep the model in memory between cards so grading doesn't wait for it to load each time. */
     private static final String KEEP_ALIVE = "30m";
+    /** Enough for the checklist, the grade and a few sentences of feedback. */
+    private static final int MAX_REPLY_TOKENS = 600;
+    /** Models that turned out not to accept the "think" switch. */
+    private static final Set<String> NO_THINK_PARAMETER = ConcurrentHashMap.newKeySet();
 
     private final String baseUrl;
 
@@ -65,35 +72,64 @@ public final class Ollama {
         return names;
     }
 
-    /** Loads the model into memory ahead of time (Ollama loads a model when it gets a request without a prompt). */
-    public void preload(String model) throws OllamaException {
-        JsonObject body = new JsonObject();
-        body.addProperty("model", model);
-        body.addProperty("keep_alive", KEEP_ALIVE);
-        send(post("/api/generate", body, Duration.ofSeconds(120)), "load " + model);
+    /**
+     * Gets the model ready while the player is still typing: loads it into memory and has it read the grading
+     * instructions once. Ollama keeps what it has already read, so when the real answer arrives it only has to read
+     * the card and the answer. That moves the heaviest burst of work to before the player is back in the game.
+     */
+    public void warmUp(ModConfig.AiGrading ai) throws OllamaException {
+        JsonObject body = chatBody(ai, "(warming up, reply with OK)", 1);
+        chat(body, Duration.ofSeconds(120), "load " + ai.model());
     }
 
     public Grade grade(ModConfig.AiGrading ai, String question, String reference, String answer) throws OllamaException {
-        String model = ai.model();
-        JsonObject body = new JsonObject();
-        body.addProperty("model", model);
-        body.addProperty("stream", false);
-        body.addProperty("keep_alive", KEEP_ALIVE);
-
-        JsonArray messages = new JsonArray();
-        messages.add(message("system", GradingPrompt.system(ai)));
-        messages.add(message("user", GradingPrompt.user(question, reference, answer)));
-        body.add("messages", messages);
+        JsonObject body = chatBody(ai, GradingPrompt.user(question, reference, answer), MAX_REPLY_TOKENS);
         body.add("format", GradingPrompt.schema()); // structured output: Ollama forces the reply into this JSON shape
 
-        JsonObject options = new JsonObject();
-        options.addProperty("temperature", 0); // the same answer should get the same grade
-        body.add("options", options);
-
-        JsonObject json = send(post("/api/chat", body, Duration.ofSeconds(180)), "grade the answer");
+        JsonObject json = chat(body, Duration.ofSeconds(180), "grade the answer");
         JsonObject message = json.getAsJsonObject("message");
         if (message == null || !message.has("content")) throw new OllamaException("Ollama sent an empty reply.");
         return GradingPrompt.parse(message.get("content").getAsString(), ai);
+    }
+
+    /** The request shared by warm-up and grading. The system message must be identical in both for Ollama to reuse it. */
+    private static JsonObject chatBody(ModConfig.AiGrading ai, String userMessage, int maxTokens) {
+        JsonObject body = new JsonObject();
+        body.addProperty("model", ai.model());
+        body.addProperty("stream", false);
+        body.addProperty("keep_alive", KEEP_ALIVE);
+        if (!NO_THINK_PARAMETER.contains(ai.model())) {
+            // "Reasoning" models (qwen3, deepseek-r1...) would think out loud for many seconds first; the checklist
+            // in the reply already makes the model reason, so skip that phase.
+            body.addProperty("think", false);
+        }
+
+        JsonArray messages = new JsonArray();
+        messages.add(message("system", GradingPrompt.system(ai)));
+        messages.add(message("user", userMessage));
+        body.add("messages", messages);
+
+        JsonObject options = new JsonObject();
+        options.addProperty("temperature", 0); // the same answer should get the same grade
+        // A grade is short; never let a confused model ramble on. A model that can't switch its thinking off
+        // spends tokens on that first, so it gets more room.
+        options.addProperty("num_predict", NO_THINK_PARAMETER.contains(ai.model()) ? maxTokens * 4 : maxTokens);
+        body.add("options", options);
+        return body;
+    }
+
+    /** Sends a chat request; if this model/Ollama version rejects the "think" switch, remembers that and retries without it. */
+    private JsonObject chat(JsonObject body, Duration timeout, String what) throws OllamaException {
+        try {
+            return send(post("/api/chat", body, timeout), what);
+        }
+        catch (OllamaException e) {
+            String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
+            if (!body.has("think") || !message.contains("think")) throw e;
+            NO_THINK_PARAMETER.add(body.get("model").getAsString());
+            body.remove("think");
+            return send(post("/api/chat", body, timeout), what);
+        }
     }
 
     private static JsonObject message(String role, String content) {

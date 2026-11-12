@@ -8,11 +8,12 @@ By [**IvanIvanochko**](https://github.com/IvanIvanochko). A fork of [Flashcards]
 - **AI grading**: type your answer and a local AI grades it by meaning, with a key-point checklist and an explanation. The score unlocks Anki's buttons. One second chance for answers that are on the right track but too vague.
 - **Play while the AI thinks**: leave a slow grading with Space and keep playing; the card comes back when it's graded.
 - **Readable cards**: normal-size text in a scrollable panel, images, and LaTeX/MathJax formulas converted to Unicode.
-- **Timer & stats HUD**: countdown to the next card, session stats, Anki's due counts.
+- **Timer & stats HUD**: countdown to the next card, session stats, Anki's due counts. Drag it anywhere and resize it.
+- **Rewards & penalties**: optional commands for right and wrong answers, with presets from "Gentle" to "Learn or Die" that you can edit.
 - **Real time or game time** for the question timer, and intervals in minutes **and seconds**.
 - Searchable deck and model lists.
 
-Everything from the original mod still works too: your own question lists, automatic/manual answer checking, and reward/penalty commands.
+Everything from the original mod still works too: your own question lists and automatic/manual answer checking.
 
 ## Requirements
 - Minecraft **26.3** with [Fabric Loader](https://fabricmc.net/) 0.19.3+ and [Fabric API](https://modrinth.com/mod/fabric-api). [Mod Menu](https://modrinth.com/mod/modmenu) is optional.
@@ -36,7 +37,7 @@ How it works:
 - Cards come from Anki's own review queue for that deck, so daily limits, learning steps and new cards behave exactly as in Anki.
 - The card is shown at normal text size in a panel that scrolls when it's long (mouse wheel, arrow keys, Page Up/Down, Home/End). When you reveal the answer of a long card, it jumps to the answer; scroll up to see the question again.
 - After **Show Answer** you grade with **Again / Hard / Good / Easy**, each showing Anki's next interval. Keys: Space/Enter shows the answer, 1-4 grades, Space/Enter = Good.
-- **Again** counts as a wrong answer for the mod's reward/penalty commands (Additional Config...), the other buttons count as correct.
+- **Again** counts as a wrong answer for [rewards and penalties](#rewards-and-penalties), the other buttons count as correct.
 - With **Sync with AnkiWeb on join/leave** ON, Anki syncs with AnkiWeb when you join and leave a world (you must be logged in to AnkiWeb inside Anki).
 - Question screens pause the game in singleplayer.
 - Images on the card are copied from Anki into `config/flashcards/media/anki/`. Audio isn't played.
@@ -64,11 +65,11 @@ Setup:
 
 On a card:
 - Type your answer in the box. **Enter** checks it (Shift+Enter starts a new line). While the AI thinks you see what it's doing and a progress bar.
-- **Slow AI?** If it thinks longer than your limit (default 15 s), a **Keep playing** button appears in the bottom-right corner (or press **Space** / Esc). It closes the card and you play while the AI finishes, with a small "thinking" indicator on screen (center by default). When the grade is ready, the card comes back and the game pauses as usual, but never sooner than your minimum play time (default 5 s), and only once you've closed other menus and haven't just been hurt.
+- **Slow AI?** If it thinks longer than your limit (default 15 s), a **Keep playing** button appears in the bottom-right corner (or press **Space** / Esc). It closes the card and you play while the AI finishes, with a small "thinking" indicator on screen (just below the crosshair by default; move and resize it in **HUD Layout...**). When the grade is ready, the card comes back and the game pauses as usual, but never sooner than your minimum play time (default 5 s), and only once you've closed other menus and haven't just been hurt.
 - With **Play while thinking** ON (default OFF) you're sent back to the game as soon as you check an answer, without waiting on the card.
 - **Show Answer** means "I don't know": you see the answer and only **Again** is available.
 - **Second chance:** if your answer is *on the right track but too vague* (something true is in it, it just isn't pinned down) and it would fail (Again), the AI tells you what to be more specific about (without giving the answer away) and you can try once more; your first answer stays in the box to extend. There's no third try: after the second answer you get the grade, whatever it is. "I don't know", excuses, off-topic and wrong answers don't get a second chance, they're simply Again.
-- After grading you see the question, your answer, the AI's grade with a **key-point checklist** (✔ correct, ~ partly, ✘ missing/wrong) and an explanation, then the card's answer.
+- After grading you see the question, your answer, the AI's grade (a badge, plus a meter showing where your score lands between your cut-offs) with a **key-point checklist** (✔ correct, ~ partly, ✘ missing/wrong) and an explanation, then the card's answer.
 - All four buttons are shown, but the score unlocks them: **Again** is always clickable, **Hard** from 0.50, **Good** from 0.70, **Easy** from 0.90. For example, 0.73 allows Again, Hard or Good. **Enter** picks the best unlocked button; 1-4 also work.
 - If Ollama isn't reachable or the reply can't be read, you can **Retry** or **Grade myself** (plain Anki buttons).
 
@@ -88,24 +89,53 @@ Settings in **AI Grading...** (saved in `config/flashcards/config.json`, so they
 - **Keep playing after N s** (default 15, 0 = at once): when the Keep playing button appears.
 - **Play at least N s** (default 5): minimum time in the game before a graded card comes back.
 - **Play while thinking** (default OFF): go back to the game right away every time.
-- **Indicator** position (Center, Top center, Top left, Top right) for the thinking animation while you play.
+- **Indicator layout...**: opens the HUD layout screen to move and resize the thinking animation shown while you play.
 - **Adjusting score** (default OFF): when ON, a slider under the result lets you change the score if you disagree with the AI, which unlocks buttons accordingly.
 
-The model is loaded while you type and kept in memory for 30 minutes, so grading usually takes a few seconds. Small models sometimes misjudge, which is why Again is always available and score adjusting exists.
+Small models sometimes misjudge, which is why Again is always available and score adjusting exists.
+
+**Speed and lag.** The AI runs on the same computer as the game, and on most machines (all Apple Silicon Macs) it uses the same graphics chip, so the game can stutter while the AI works. The mod keeps that as short as it can:
+- While you type, the model is loaded and reads its grading instructions, so the heaviest part is done before you're back in the game.
+- The model stays in memory for 30 minutes, and reasoning models (qwen3, deepseek-r1...) are told to skip their "thinking out loud" phase.
+- The reply is capped in length.
+
+If it still stutters, a smaller model (`qwen2.5:3b`, `llama3.2:3b`) helps the most, followed by lowering Minecraft's render distance.
 
 ## Timer and study HUD
-A small panel (top left by default) shows:
-- the countdown to the next question (yellow in the last 10 seconds),
+A small panel shows:
+- the countdown to the next question with a progress bar (yellow in the last 10 seconds),
 - how many cards you answered this session (correct ✔ / wrong ✘),
-- in Anki mode: cards reviewed today in Anki (all devices) and what's still due in your deck (new / learning / review, after Anki's daily limits).
+- in Anki mode: cards reviewed today in Anki (all devices) and what's still **Due** in your deck as three numbers in Anki's own colours and order: blue = new, red = learning, green = to review (after Anki's daily limits).
 
-Settings are in Flashcards config → **General Config...**:
+**Moving and resizing:** Flashcards config → **HUD Layout...** Drag the study panel or the AI thinking indicator anywhere; scroll over one (or press `+` / `-`) to resize it from 50% to 300%; arrow keys nudge by a pixel (Shift = 10). Panels snap to the screen's centre lines and can't leave the screen, and they keep their relative position if you resize the window. **Reset** puts both back.
+
+Other settings are in Flashcards config → **General...**:
 - **Question timer: Real time / Game time**
   - *Real time* (default) counts real-world minutes, even while the game is paused or a menu is open.
   - *Game time* counts only while the world is running, so it stops while the game is paused and follows `/tick rate`. 1 minute = 1200 game ticks (a full Minecraft day is 20 minutes). In multiplayer the game never pauses, so this behaves almost like real time.
-- **Timer & stats HUD: ON/OFF** and **HUD position** (any corner). The HUD is hidden with F1 and while the F3 debug screen is open.
+- **Timer & stats HUD: ON/OFF**. The HUD is hidden with F1 and while the F3 debug screen is open.
 
 The interval itself is set on the main config screen: "Prompt a question every [N] min [N] sec" (at least 1 second in total).
+
+## Rewards and penalties
+Optional. Flashcards config → **Rewards & Penalties...** lets commands run when you answer right (in Anki mode: Hard, Good or Easy) or wrong (Again).
+
+Pick a **preset**, then change anything you like in the two command boxes (one command per line, no `/`); editing turns the preset into *Custom*, and your custom commands are kept while you browse the other presets.
+
+| Preset | Right answer | Wrong answer |
+|---|---|---|
+| **None** | nothing | nothing |
+| **Gentle** | 5 XP, 5 s of regeneration | 10 s of slowness |
+| **Balanced** | 10 XP, food, 30 s of speed | 20 s of hunger, 30 s of mining fatigue |
+| **Tough** | 15 XP, extra (absorption) hearts for a minute | 3 hearts of damage, weakness, darkness |
+| **Learn or Die** | 20 XP, regeneration, resistance | you die |
+| **Lucky Dip** | one random prize: iron, gold, a diamond, emeralds, a golden apple, XP bottles or XP | one random mishap: nausea, hunger, levitation, 2 hearts of damage, a lightning strike or a zombie |
+
+**Mode** decides how the boxes are used: *Execute All* runs every line, *Randomise One* picks one line at random (Lucky Dip uses this), *OFF* runs nothing.
+
+- **Singleplayer** (and when you host a LAN world): the commands are run by the world itself, so they work even if the world was created with cheats off, and they don't fill your chat. If a line isn't a valid command, you get a chat message saying which one.
+- **Multiplayer:** the commands are sent as you, so the server must allow you to run them (operator permission).
+- Commands run as you, at your position: `@s` is you and `~ ~ ~` is where you stand.
 
 ## Building
 Needs JDK 25 and [Gradle](https://gradle.org/install/) 9.5.1 (the repo has no `gradlew` script).

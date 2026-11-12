@@ -33,10 +33,15 @@ public class ConfigurationScreen extends Screen {
         if (button.getMessage().getString().equals("ON")) button.setMessage(Component.literal("OFF"));
         else button.setMessage(Component.literal("ON"));
     }).build();
-    private final Button editButton = Button.builder(Component.literal("Edit Questions"), _ -> Minecraft.getInstance().gui.setScreen(new EditScreen())).build();
+    private final Button editButton = Button.builder(Component.literal("Edit Questions"), _ -> Minecraft.getInstance().gui.setScreen(new EditScreen()))
+            .tooltip(Tooltip.create(Component.literal("Your own question lists (used when Anki mode is off)"))).build();
     private final Button doneButton = Button.builder(Component.literal("Done"), _ -> this.onClose()).build();
-    private final Button generalConfigButton = Button.builder(Component.literal("General Config..."),_ -> Minecraft.getInstance().gui.setScreen(new GeneralConfigScreen())).build();
-    private final Button additionalConfigButton = Button.builder(Component.literal("Additional Config..."), _ -> Minecraft.getInstance().gui.setScreen(new AdditionalConfigScreen())).build();
+    private final Button generalConfigButton = Button.builder(Component.literal("General..."),_ -> Minecraft.getInstance().gui.setScreen(new GeneralConfigScreen()))
+            .tooltip(Tooltip.create(Component.literal("Answer checking, real time or game time, HUD on/off"))).build();
+    private final Button rewardsButton = Button.builder(Component.literal("Rewards & Penalties..."), _ -> Minecraft.getInstance().gui.setScreen(new RewardsConfigScreen()))
+            .tooltip(Tooltip.create(Component.literal("Optional: commands that run when you answer right or wrong, with presets"))).build();
+    private final Button hudLayoutButton = Button.builder(Component.literal("HUD Layout..."), _ -> Minecraft.getInstance().gui.setScreen(new HudLayoutScreen()))
+            .tooltip(Tooltip.create(Component.literal("Move and resize the study panel and the AI thinking indicator"))).build();
     private final Button ankiConfigButton = Button.builder(Component.literal("Anki Sync..."), _ -> Minecraft.getInstance().gui.setScreen(new AnkiConfigScreen()))
             .tooltip(Tooltip.create(Component.literal("Study your real Anki deck in-game"))).build();
     private final Button aiGradingButton = Button.builder(Component.literal("AI Grading..."), _ -> Minecraft.getInstance().gui.setScreen(new AiGradingConfigScreen()))
@@ -58,14 +63,14 @@ public class ConfigurationScreen extends Screen {
         Minecraft.getInstance().gui.setScreen(popup);
     }).build();
 
-    private final Button openFlashcardsFolderButton = Button.builder(Component.literal("📂"),_ -> {
+    private final Button openFlashcardsFolderButton = Button.builder(Component.literal("Open Folder"),_ -> {
         try {
             Desktop.getDesktop().open(new File(Minecraft.getInstance().gameDirectory.toPath() + "/config/flashcards"));
         }
         catch (IOException e) {
             Flashcards.LOGGER.warn("Failed to open flashcards folder",e);
         }
-    }).tooltip(Tooltip.create(Component.literal("Open Flashcards Mod Folder"))).build();
+    }).tooltip(Tooltip.create(Component.literal("Open the mod's folder (config, questions, images)"))).build();
 
     public ConfigurationScreen(@Nullable Screen parent) {
         super(Component.literal("Flashcards Config"));
@@ -117,14 +122,27 @@ public class ConfigurationScreen extends Screen {
         x += secondsText.getWidth() + 10;
         intervalButton.setRectangle(30,20,x, 40);
 
-        editButton.setRectangle(100,20,width/2 - 50,80);
-        generalConfigButton.setRectangle(100,20,width/2 - 50,105);
-        additionalConfigButton.setRectangle(100,20,width/2 - 50,130);
-        ankiConfigButton.setRectangle(100,20,width/2 - 50,155);
-        aiGradingButton.setRectangle(100,20,width/2 - 50,180);
-        statsButton.setRectangle(100,20,width/2 - 50,205);
-        doneButton.setRectangle(75,20,width/2 - 37,height - 30);
-        openFlashcardsFolderButton.setRectangle(20,20,width/2 + 55,80);
+        // two tidy columns of buttons
+        boolean canOpenFolder = Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN);
+        int columnWidth = 150, gap = 6, rowHeight = 24;
+        int left = width/2 - columnWidth - gap/2;
+        int right = width/2 + gap/2;
+        int y = 76;
+        if (canOpenFolder) {
+            editButton.setRectangle(columnWidth,20,left,y);
+            openFlashcardsFolderButton.setRectangle(columnWidth,20,right,y);
+        }
+        else editButton.setRectangle(columnWidth*2 + gap,20,left,y);
+        y += rowHeight;
+        ankiConfigButton.setRectangle(columnWidth,20,left,y);
+        aiGradingButton.setRectangle(columnWidth,20,right,y);
+        y += rowHeight;
+        rewardsButton.setRectangle(columnWidth,20,left,y);
+        hudLayoutButton.setRectangle(columnWidth,20,right,y);
+        y += rowHeight;
+        generalConfigButton.setRectangle(columnWidth,20,left,y);
+        statsButton.setRectangle(columnWidth,20,right,y);
+        doneButton.setRectangle(100,20,width/2 - 50,Math.max(y + rowHeight + 6, height - 30));
 
         addRenderableOnly(titleText);
         addRenderableOnly(intervalText);
@@ -134,15 +152,14 @@ public class ConfigurationScreen extends Screen {
         addRenderableWidget(intervalSecondsField);
         addRenderableWidget(intervalButton);
         addRenderableWidget(editButton);
-        addRenderableWidget(generalConfigButton);
-        addRenderableWidget(additionalConfigButton);
+        if (canOpenFolder) addRenderableWidget(openFlashcardsFolderButton);
         addRenderableWidget(ankiConfigButton);
         addRenderableWidget(aiGradingButton);
+        addRenderableWidget(rewardsButton);
+        addRenderableWidget(hudLayoutButton);
+        addRenderableWidget(generalConfigButton);
         addRenderableWidget(statsButton);
         addRenderableWidget(doneButton);
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
-            addRenderableWidget(openFlashcardsFolderButton);
-        }
     }
 
     @Override

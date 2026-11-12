@@ -1,15 +1,22 @@
 package io.github.dennisochulor.flashcards.questions;
 
+import com.mojang.brigadier.ParseResults;
 import io.github.dennisochulor.flashcards.FileManager;
+import io.github.dennisochulor.flashcards.Flashcards;
 import io.github.dennisochulor.flashcards.ModStats;
 import io.github.dennisochulor.flashcards.anki.StudyStats;
 import io.github.dennisochulor.flashcards.config.ModConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.util.CommonColors;
 
 import java.util.List;
+import java.util.UUID;
 
 /** Shared side effects of answering a question: sound, stats and the configured reward/penalty commands. */
 public final class AnswerOutcome {
@@ -23,19 +30,66 @@ public final class AnswerOutcome {
         StudyStats.recordAnswer(correct);
     }
 
+    /** Runs the reward (right answer) or penalty (wrong answer) commands from the Rewards &amp; Penalties screen. */
     public static void runCommands(boolean correct) {
-        LocalPlayer player = Minecraft.getInstance().player;
-        ClientPacketListener connection = Minecraft.getInstance().getConnection();
+        Minecraft minecraft = Minecraft.getInstance();
+        LocalPlayer player = minecraft.player;
+        ClientPacketListener connection = minecraft.getConnection();
         if (player == null || connection == null) return;
 
         ModConfig config = FileManager.getConfig();
         List<String> commands = correct ? config.correctAnswerCommands() : config.wrongAnswerCommands();
         if (commands.isEmpty()) return;
 
-        switch (config.commandSelectionStrategy()) {
-            case EXECUTE_ALL -> commands.forEach(c -> connection.sendCommand("execute as @s at @s run " + c));
-            case RANDOMISE_ONE -> connection.sendCommand("execute as @s at @s run " + commands.get(player.getRandom().nextInt(commands.size())));
-            case OFF -> {}
+        List<String> toRun = switch (config.commandSelectionStrategy()) {
+            case EXECUTE_ALL -> commands;
+            case RANDOMISE_ONE -> List.of(commands.get(player.getRandom().nextInt(commands.size())));
+            case OFF -> List.of();
+        };
+        if (toRun.isEmpty()) return;
+
+        IntegratedServer server = minecraft.getSingleplayerServer();
+        if (server != null) {
+            runOnIntegratedServer(server, player.getUUID(), toRun);
         }
+        else { // multiplayer: the server decides whether the player may run them
+            toRun.forEach(command -> connection.sendCommand("execute as @s at @s run " + command));
+        }
+    }
+
+    /**
+     * Singleplayer (and LAN host): the world runs inside this game, so the commands are executed by the world itself,
+     * on its own thread. That works whether or not the world has cheats enabled, and doesn't spam the chat.
+     * A command that can't be understood is reported to the player instead of failing silently.
+     */
+    private static void runOnIntegratedServer(IntegratedServer server, UUID playerId, List<String> commands) {
+        server.execute(() -> {
+            CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
+            for (String command : commands) {
+                String full = "execute as " + playerId + " at @s run " + command;
+                try {
+                    ParseResults<CommandSourceStack> parsed = server.getCommands().getDispatcher().parse(full, source);
+                    if (parsed.getReader().canRead() || !parsed.getExceptions().isEmpty()) {
+                        reportBadCommand(command);
+                        continue;
+                    }
+                    server.getCommands().performCommand(parsed, full);
+                }
+                catch (RuntimeException e) {
+                    Flashcards.LOGGER.warn("Reward/penalty command failed: {}", command, e);
+                    reportBadCommand(command);
+                }
+            }
+        });
+    }
+
+    private static void reportBadCommand(String command) {
+        Minecraft minecraft = Minecraft.getInstance();
+        minecraft.execute(() -> {
+            if (minecraft.player != null) {
+                minecraft.player.sendSystemMessage(Component.literal("Flashcards: this command isn't valid, check Rewards & Penalties: /" + command)
+                        .withColor(CommonColors.SOFT_RED));
+            }
+        });
     }
 }

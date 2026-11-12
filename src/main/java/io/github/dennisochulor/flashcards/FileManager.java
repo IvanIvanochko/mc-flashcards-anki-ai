@@ -13,7 +13,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -30,6 +33,15 @@ public final class FileManager {
     private static final File questionsFolder;
     private static final File mediaFolder;
     private static ModConfig config;
+    private static ModStats stats; // kept in memory, so answering a card never waits for the disk
+
+    /** Files are written on this thread, in order, so saving never stalls a frame. Daemon so quitting never hangs. */
+    private static final ExecutorService IO = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "Flashcards-IO");
+        t.setDaemon(true);
+        return t;
+    });
+    private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
     static {
         try {
@@ -56,6 +68,7 @@ public final class FileManager {
             Files.copy(Objects.requireNonNull(FileManager.class.getResourceAsStream("/flashcards/flashcards-dp.zip")),Path.of(dotMinecraftFolder + "/config/flashcards/flashcards-dp.zip"), StandardCopyOption.REPLACE_EXISTING);
 
             config = new Gson().fromJson(Files.readString(configFile.toPath()),ModConfig.class);
+            stats = new Gson().fromJson(Files.readString(statsFile.toPath()),ModStats.class);
 
             importQuestions();
 
@@ -74,16 +87,33 @@ public final class FileManager {
     }
 
     public static void updateConfig(ModConfig config) {
+        FileManager.config = config;
+        writeAsync(configFile, PRETTY_GSON.toJson(config, ModConfig.class));
+    }
+
+    /** Serialized on the calling thread (so the snapshot is consistent), written to disk in the background. */
+    private static void writeAsync(File file, String json) {
+        IO.execute(() -> {
+            try {
+                // write to a temp file first: a crash mid-write can't leave a half-written config behind
+                Path temp = Path.of(file.getPath() + ".tmp");
+                Files.writeString(temp, json);
+                Files.move(temp, file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            }
+            catch (IOException e) {
+                Flashcards.LOGGER.error("Failed to save {}", file.getName(), e);
+            }
+        });
+    }
+
+    /** Waits for pending saves; call when the game is closing. */
+    public static void flush() {
+        IO.shutdown();
         try {
-            Gson gson = new GsonBuilder().setPrettyPrinting().create();
-            FileWriter writer = new FileWriter(configFile);
-            gson.toJson(config,ModConfig.class,writer);
-            writer.flush();
-            writer.close();
-            FileManager.config = config;
+            if (!IO.awaitTermination(5, TimeUnit.SECONDS)) Flashcards.LOGGER.warn("Timed out saving Flashcards files");
         }
-        catch (IOException e) {
-            throw new UncheckedIOException(e);
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -123,25 +153,12 @@ public final class FileManager {
     }
 
     public static ModStats getStats() {
-        try {
-            return new Gson().fromJson(Files.readString(statsFile.toPath()),ModStats.class);
-        }
-        catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return stats;
     }
 
     public static void updateStats(ModStats stats) {
-        try {
-            Gson gson = new GsonBuilder().setPrettyPrinting().create();
-            FileWriter writer = new FileWriter(statsFile);
-            gson.toJson(stats,ModStats.class,writer);
-            writer.flush();
-            writer.close();
-        }
-        catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        FileManager.stats = stats;
+        writeAsync(statsFile, PRETTY_GSON.toJson(stats, ModStats.class));
     }
 
     /**

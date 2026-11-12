@@ -29,12 +29,12 @@ public final class AiGrader {
         return config.ankiMode() && config.aiGrading().enabled() && !config.aiGrading().model().isBlank();
     }
 
-    /** Starts loading the model while the player is still typing, so grading is quick. Errors are ignored here. */
+    /** Gets the model ready while the player is still typing, so grading is quick. Errors are ignored here. */
     public static void preload() {
         ModConfig.AiGrading ai = FileManager.getConfig().aiGrading();
         EXECUTOR.execute(() -> {
             try {
-                new Ollama(ai.ollamaUrl()).preload(ai.model());
+                new Ollama(ai.ollamaUrl()).warmUp(ai);
             }
             catch (Ollama.OllamaException | RuntimeException e) {
                 Flashcards.LOGGER.debug("Couldn't preload Ollama model {}", ai.model(), e);

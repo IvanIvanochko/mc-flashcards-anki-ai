@@ -95,6 +95,11 @@ public class QuestionScheduler {
         return config.timerMode();
     }
 
+    /** @return the full interval between questions, in milliseconds */
+    public static long totalMillis() {
+        return config.intervalTotalSeconds() * 1000L;
+    }
+
     /** @return milliseconds until the next question (game-time milliseconds in GAME_TIME mode), 0 when due. */
     public static long remainingMillis() {
         if (state != State.COUNTING) return 0;

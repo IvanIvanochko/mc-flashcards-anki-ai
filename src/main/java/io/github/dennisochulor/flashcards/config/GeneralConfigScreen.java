@@ -43,10 +43,9 @@ class GeneralConfigScreen extends Screen {
             .withTooltip(_ -> Tooltip.create(Component.literal("Show a countdown to the next question plus your study stats on screen.")))
             .create(0, 0, 200, 20, Component.literal("Timer & stats HUD"));
 
-    private final CycleButton<ModConfig.HudPosition> hudPositionButton =
-            new CycleButton.Builder<ModConfig.HudPosition>(pos -> Component.literal(pos.friendlyName), config::hudPosition)
-            .withValues(ModConfig.HudPosition.values())
-            .create(0, 0, 200, 20, Component.literal("HUD position"));
+    private final Button hudLayoutButton = Button.builder(Component.literal("HUD Layout..."), _ -> Minecraft.getInstance().gui.setScreen(new HudLayoutScreen()))
+            .tooltip(Tooltip.create(Component.literal("Drag the study panel and the AI thinking indicator anywhere, and resize them.")))
+            .size(200, 20).build();
 
     private final Button doneButton = Button.builder(Component.literal("Done"), _ -> this.onClose())
             .size(100, 20).build();
@@ -58,7 +57,7 @@ class GeneralConfigScreen extends Screen {
         options.addChild(validationToggleButton);
         options.addChild(timerModeButton);
         options.addChild(hudButton);
-        options.addChild(hudPositionButton);
+        options.addChild(hudLayoutButton);
 
         HeaderAndFooterLayout root = new HeaderAndFooterLayout(this, 25, 40);
         root.addToHeader(titleText);
@@ -75,7 +74,7 @@ class GeneralConfigScreen extends Screen {
         boolean validationToggle = validationToggleButton.getValue().equals("Automatic");
 
         ModConfig newConfig = FileManager.getConfig().withValidationToggle(validationToggle)
-                .withTimerAndHud(timerModeButton.getValue(), hudButton.getValue(), hudPositionButton.getValue());
+                .withTimerAndHud(timerModeButton.getValue(), hudButton.getValue());
         FileManager.updateConfig(newConfig);
         QuestionScheduler.updateConfig(newConfig);
 

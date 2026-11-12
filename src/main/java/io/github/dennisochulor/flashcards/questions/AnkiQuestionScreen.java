@@ -48,6 +48,10 @@ public class AnkiQuestionScreen extends Screen {
     private static final int ANSWER_BOX_HEIGHT = 56;
     private static final int GRAY = 0xFFAAAAAA;
     private static final int EASY_BLUE = 0xFF55AAFF;
+    private static final int ACCENT_BLUE = 0xFF6EA8FF;
+    private static final int SECTION_GRAY = 0xFF8A93A6;
+    private static final String[] METER_NAMES = {"Again", "Hard", "Good", "Easy"};
+    private static final int[] METER_COLORS = {CommonColors.SOFT_RED, CommonColors.SOFT_YELLOW, CommonColors.GREEN, EASY_BLUE};
 
     /** A card the player left (Quit) while the AI was grading; it reopens once graded. */
     private static @Nullable AnkiQuestionScreen background = null;
@@ -248,18 +252,22 @@ public class AnkiQuestionScreen extends Screen {
         else if (card.answerImage() == null) blocks.add(new CardView.Text(heading("(no answer text)"), GRAY));
     }
 
+    private static CardView.Section section(String label) {
+        return new CardView.Section(label, SECTION_GRAY);
+    }
+
     private void addTypedAnswer(List<CardView.Block> blocks) {
-        blocks.add(new CardView.Divider());
-        blocks.add(new CardView.Text(heading(attempt == 2 ? "Your answer (second try)" : "Your answer"), GRAY));
+        blocks.add(section(attempt == 2 ? "YOUR ANSWER · SECOND TRY" : "YOUR ANSWER"));
         blocks.add(new CardView.Text(userText(typedAnswer), CommonColors.LIGHT_GRAY));
     }
 
-    /** The AI's verdict: grade + score, key-point checklist, vagueness note and feedback. */
+    /** The AI's verdict: grade badge, score meter, key-point checklist, vagueness note and feedback. */
     private void addVerdict(List<CardView.Block> blocks, Ollama.Grade grade) {
         String name = ease4ToName(grade.ease());
-        blocks.add(new CardView.Text(Component.literal("AI grade: ").withColor(GRAY)
-                .append(Component.literal(name).withColor(buttonColor(name)))
-                .append(Component.literal("  (" + format(grade.score()) + ")").withColor(GRAY)), CommonColors.WHITE));
+        blocks.add(new CardView.Badge(Component.literal(name.toUpperCase(Locale.ROOT)).withColor(buttonColor(name))
+                .append(Component.literal("  " + format(grade.score())).withColor(CommonColors.WHITE)), buttonColor(name)));
+        // the marker follows the score that unlocks the buttons (the AI's, or yours when score adjusting is on)
+        blocks.add(meter());
 
         if (!grade.keyPoints().isEmpty()) {
             MutableComponent list = Component.empty();
@@ -286,19 +294,22 @@ public class AnkiQuestionScreen extends Screen {
         if (!grade.feedback().isBlank()) blocks.add(new CardView.Text(userText(grade.feedback()), CommonColors.WHITE));
     }
 
+    private CardView.Meter meter() {
+        return new CardView.Meter(score, ai.hardFrom(), ai.goodFrom(), ai.easyFrom(), METER_NAMES, METER_COLORS);
+    }
+
     private List<CardView.Block> blocksForPhase() {
         List<CardView.Block> blocks = questionBlocks();
         switch (phase) {
             case QUESTION -> {}
             case SECOND_CHANCE -> {
-                blocks.add(new CardView.Divider());
-                blocks.add(new CardView.Text(heading("Your first answer"), GRAY));
+                blocks.add(section("YOUR FIRST ANSWER"));
                 blocks.add(new CardView.Text(userText(firstAnswer), CommonColors.LIGHT_GRAY));
-                blocks.add(new CardView.Text(Component.literal("Too vague. Second chance, be more specific:"), CommonColors.SOFT_YELLOW));
+                blocks.add(new CardView.Section("SECOND CHANCE · BE MORE SPECIFIC", CommonColors.SOFT_YELLOW));
                 blocks.add(new CardView.Text(userText(secondChanceHint), CommonColors.WHITE));
             }
             case REVEALED, GAVE_UP -> {
-                blocks.add(new CardView.Divider());
+                blocks.add(section("ANSWER"));
                 answerBlockIndex = blocks.size() - 1;
                 addCardAnswer(blocks);
             }
@@ -308,16 +319,26 @@ public class AnkiQuestionScreen extends Screen {
                 blocks.add(new CardView.Text(Component.literal("Couldn't grade: " + gradeError), CommonColors.SOFT_RED));
             }
             case GRADED -> {
+                answerBlockIndex = blocks.size(); // the "YOUR ANSWER" section
                 addTypedAnswer(blocks);
-                answerBlockIndex = blocks.size() - 3; // the divider above "Your answer"
-                blocks.add(new CardView.Divider());
+                blocks.add(section("AI GRADE"));
                 if (aiGrade != null) addVerdict(blocks, aiGrade);
-                blocks.add(new CardView.Divider());
-                blocks.add(new CardView.Text(heading("Card answer"), GRAY));
+                blocks.add(section("CARD ANSWER"));
                 addCardAnswer(blocks);
             }
         }
         return blocks;
+    }
+
+    /** The colour of the thin line along the top of the card: what state this card is in. */
+    private int accentForPhase() {
+        return switch (phase) {
+            case QUESTION, REVEALED -> ACCENT_BLUE;
+            case SECOND_CHANCE -> CommonColors.SOFT_YELLOW;
+            case GRADING -> ThinkingAnimation.PURPLE;
+            case GRADE_ERROR, GAVE_UP -> CommonColors.SOFT_RED;
+            case GRADED -> aiGrade == null ? ACCENT_BLUE : buttonColor(ease4ToName(aiGrade.ease()));
+        };
     }
 
     // ---------------------------------------------------------------- layout
@@ -326,6 +347,7 @@ public class AnkiQuestionScreen extends Screen {
     public void init() {
         // blocks depend on the screen height (image size), so rebuild them on resize
         cardView.setBlocks(blocksForPhase());
+        cardView.setAccent(accentForPhase());
 
         int cardWidth = Math.min(MAX_CARD_WIDTH, width - 32);
         int cardX = (width - cardWidth) / 2;
@@ -357,6 +379,7 @@ public class AnkiQuestionScreen extends Screen {
                 scoreSlider = new ScoreSlider(200, BUTTON_HEIGHT, "Your score: ", score, value -> {
                     score = value;
                     updateGradeButtons();
+                    cardView.replaceMeter(meter()); // move the marker; nothing else on the card changes
                 });
                 scoreSlider.setTooltip(Tooltip.create(Component.literal("Disagree with the AI? Drag to change the score; it unlocks the buttons.")));
             }
@@ -422,6 +445,18 @@ public class AnkiQuestionScreen extends Screen {
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
         if (phase == Phase.GRADING) extractThinking(graphics);
+
+        // a strip in each grade button's colour: bright if you can press it, faint if it's locked
+        if (phase == Phase.REVEALED || phase == Phase.GRADED || phase == Phase.GAVE_UP) {
+            for (int i = 0; i < gradeButtons.size(); i++) {
+                Button button = gradeButtons.get(i);
+                if (phase == Phase.GAVE_UP && gradeEases.get(i) != AGAIN) continue; // not on screen
+                int color = buttonColor(gradeNames.get(i));
+                int alpha = button.active ? 0xE0 : 0x40;
+                graphics.fill(button.getX() + 1, button.getBottom() + 1, button.getRight() - 1, button.getBottom() + 3,
+                        (alpha << 24) | (color & 0x00FFFFFF));
+            }
+        }
     }
 
     private void extractThinking(GuiGraphicsExtractor graphics) {
