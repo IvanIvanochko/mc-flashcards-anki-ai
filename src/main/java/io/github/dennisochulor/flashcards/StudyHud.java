@@ -36,8 +36,14 @@ public final class StudyHud {
     private static final int ROW_HEIGHT = 11;
     private static final int COLUMN_GAP = 12;
     private static final int MIN_INNER_WIDTH = 92;
-    private static final int PANEL_FILL = 0xCC0E0F14;
-    private static final int PANEL_EDGE = 0x30FFFFFF;
+    // full strength; the "background" setting scales these (its default 80% gives the original look)
+    private static final int PANEL_FILL = 0xFF0E0F14;
+    private static final int PANEL_EDGE = 0x3CFFFFFF;
+    private static final int PANEL_FAINT_EDGE = 0x1EFFFFFF;
+    /** How long the study panel takes to fade between its normal and its idle look. */
+    private static final float IDLE_FADE_MILLIS = 400;
+    /** The study panel counts as idle while the next card is further away than this. */
+    private static final long IDLE_AFTER_MILLIS = 10_000;
     private static final int BAR_TRACK = 0x38FFFFFF;
 
     private static final int GRAY = 0xFFA0A4AE;
@@ -60,6 +66,55 @@ public final class StudyHud {
     private static long panelKey = Long.MIN_VALUE;
     private static @Nullable ModConfig panelConfig = null;
     private static StudyStats.@Nullable AnkiStats panelAnki = null;
+
+    // ---------------------------------------------------------------- look: transparency of each element
+
+    private static float bgAlpha = 1f, fgAlpha = 1f; // the element being drawn: background and content strength, 0-1
+    private static float idleBlend = 0f;              // study panel: 0 = normal look, 1 = idle look
+    private static long lastFadeMillis = 0;
+
+    private static int scaleAlpha(int color, float factor) {
+        return ((int) (((color >>> 24) & 0xFF) * Math.max(0, Math.min(1, factor))) << 24) | (color & 0x00FFFFFF);
+    }
+
+    /** A colour of the content (text, accent, bars) at the current element's strength. */
+    private static int fg(int color) {
+        return scaleAlpha(color, fgAlpha);
+    }
+
+    /** A colour of the panel behind the content at the current element's strength. */
+    private static int bg(int color) {
+        return scaleAlpha(color, bgAlpha);
+    }
+
+    /**
+     * Sets how the next element is drawn, from its HUD layout settings.
+     * @param visibility an extra factor for the whole element (the study panel's idle fade), 0-1
+     * @return false if the element would be invisible, so it needn't be drawn at all
+     */
+    private static boolean useLook(ModConfig.Placement placement, float visibility) {
+        bgAlpha = placement.background() / 100f * visibility;
+        fgAlpha = placement.content() / 100f * visibility;
+        return fgAlpha > 0.02f;
+    }
+
+    /** Whether nothing is happening that the study panel needs to show: the next card is still a while off. */
+    private static boolean studyPanelIdle(ModConfig config) {
+        if (AnkiQuestionScreen.backgroundCard() != null) return false;
+        if (!config.intervalToggle()) return true;
+        return QuestionScheduler.state() == QuestionScheduler.State.COUNTING && QuestionScheduler.remainingMillis() > IDLE_AFTER_MILLIS;
+    }
+
+    /** The study panel's idle fade, eased over {@link #IDLE_FADE_MILLIS} so it doesn't pop in and out. */
+    private static float studyPanelVisibility(ModConfig config, ModConfig.Placement placement) {
+        long now = System.currentTimeMillis();
+        float step = lastFadeMillis == 0 ? 1 : Math.min(1, (now - lastFadeMillis) / IDLE_FADE_MILLIS);
+        lastFadeMillis = now;
+        float target = studyPanelIdle(config) ? 1 : 0;
+        idleBlend += (target - idleBlend) * step;
+        if (Math.abs(target - idleBlend) < 0.01f) idleBlend = target;
+        return 1 + (placement.idle() / 100f - 1) * idleBlend;
+    }
 
     // ---------------------------------------------------------------- HUD entry point
 
@@ -87,6 +142,13 @@ public final class StudyHud {
     }
 
     public static void drawStats(GuiGraphicsExtractor graphics, Minecraft minecraft, ModConfig config, ModConfig.Placement placement) {
+        drawStats(graphics, minecraft, config, placement, studyPanelVisibility(config, placement));
+    }
+
+    /** @param visibility 1 for the normal look, {@code placement.idle()/100} for the idle look (used by the layout preview) */
+    public static void drawStats(GuiGraphicsExtractor graphics, Minecraft minecraft, ModConfig config, ModConfig.Placement placement,
+                                 float visibility) {
+        if (!useLook(placement, visibility)) return; // faded out completely while idle
         Panel p = panel(minecraft, config);
         Font font = minecraft.font;
         float scale = placement.scale().floatValue();
@@ -102,18 +164,18 @@ public final class StudyHud {
         int right = p.width() - PAD;
         int y = PAD - 1;
 
-        graphics.text(font, p.title(), x, y, CommonColors.WHITE, true);
-        graphics.text(font, p.value(), right - font.width(p.value()), y, CommonColors.WHITE, true);
+        graphics.text(font, p.title(), x, y, fg(CommonColors.WHITE), true);
+        graphics.text(font, p.value(), right - font.width(p.value()), y, fg(CommonColors.WHITE), true);
         y += font.lineHeight + 2;
         if (p.showBar()) {
             float done = progress();
-            graphics.fill(x, y, right, y + 2, BAR_TRACK);
-            graphics.fill(x, y, x + Math.round((right - x) * done), y + 2, p.accent());
+            graphics.fill(x, y, right, y + 2, fg(BAR_TRACK));
+            graphics.fill(x, y, x + Math.round((right - x) * done), y + 2, fg(p.accent()));
         }
         y += 2 + 4;
         for (Row row : p.rows()) {
-            graphics.text(font, row.label(), x, y, CommonColors.WHITE, true);
-            graphics.text(font, row.value(), right - font.width(row.value()), y, CommonColors.WHITE, true);
+            graphics.text(font, row.label(), x, y, fg(CommonColors.WHITE), true);
+            graphics.text(font, row.value(), right - font.width(row.value()), y, fg(CommonColors.WHITE), true);
             y += ROW_HEIGHT;
         }
         graphics.pose().popMatrix();
@@ -219,15 +281,16 @@ public final class StudyHud {
         List<Row> rows = new ArrayList<>(4);
         // a card that is due but not showing: say what it's waiting for
         if (waiting != null) rows.add(new Row(Component.literal("Waiting").withColor(YELLOW), Component.literal(waiting).withColor(CommonColors.WHITE)));
+        ModConfig.HudDetail detail = config.hudDetail();
         int total = StudyStats.sessionTotal();
         MutableComponent session = Component.literal(String.valueOf(total)).withColor(CommonColors.WHITE);
         if (total > 0) {
             session.append(Component.literal("  " + StudyStats.sessionCorrect() + "✔").withColor(GREEN))
                     .append(Component.literal(" " + StudyStats.sessionWrong() + "✘").withColor(RED));
         }
-        rows.add(new Row(Component.literal("Session").withColor(GRAY), session));
+        if (detail != ModConfig.HudDetail.TIMER) rows.add(new Row(Component.literal("Session").withColor(GRAY), session));
 
-        if (AnkiSession.isEnabled()) {
+        if (detail == ModConfig.HudDetail.FULL && AnkiSession.isEnabled()) {
             if (anki == null) {
                 rows.add(new Row(Component.literal("Anki").withColor(GRAY), Component.literal("not connected").withColor(DIM)));
             }
@@ -248,7 +311,8 @@ public final class StudyHud {
         int inner = Math.max(MIN_INNER_WIDTH, font.width(title) + COLUMN_GAP + font.width(value));
         for (Row row : rows) inner = Math.max(inner, font.width(row.label()) + COLUMN_GAP + font.width(row.value()));
         int width = ACCENT_WIDTH + PAD + inner + PAD;
-        int height = (PAD - 1) + font.lineHeight + 2 + 2 + 4 + rows.size() * ROW_HEIGHT - (ROW_HEIGHT - font.lineHeight) + PAD - 1;
+        int rowsHeight = rows.isEmpty() ? 0 : 4 + rows.size() * ROW_HEIGHT - (ROW_HEIGHT - font.lineHeight);
+        int height = (PAD - 1) + font.lineHeight + 2 + 2 + rowsHeight + PAD - 1;
         return new Panel(title, value, accent, showBar, List.copyOf(rows), width, height);
     }
 
@@ -265,11 +329,11 @@ public final class StudyHud {
     }
 
     private static void drawPanelBackground(GuiGraphicsExtractor graphics, int width, int height, int accent) {
-        graphics.fill(0, 0, width, height, PANEL_FILL);
-        graphics.fill(ACCENT_WIDTH, 0, width, 1, PANEL_EDGE);                   // top highlight
-        graphics.fill(width - 1, 1, width, height, 0x18FFFFFF);                 // faint right edge
-        graphics.fill(ACCENT_WIDTH, height - 1, width - 1, height, 0x18FFFFFF); // faint bottom edge
-        graphics.fill(0, 0, ACCENT_WIDTH, height, accent);                      // state colour
+        graphics.fill(0, 0, width, height, bg(PANEL_FILL));
+        graphics.fill(ACCENT_WIDTH, 0, width, 1, bg(PANEL_EDGE));                   // top highlight
+        graphics.fill(width - 1, 1, width, height, bg(PANEL_FAINT_EDGE));                 // faint right edge
+        graphics.fill(ACCENT_WIDTH, height - 1, width - 1, height, bg(PANEL_FAINT_EDGE)); // faint bottom edge
+        graphics.fill(0, 0, ACCENT_WIDTH, height, fg(accent));                      // state colour
     }
 
     // ---------------------------------------------------------------- "AI is thinking" indicator
@@ -293,21 +357,22 @@ public final class StudyHud {
         int left = placement.left(graphics.guiWidth(), size[0]);
         int top = placement.top(graphics.guiHeight(), size[1]);
 
+        if (!useLook(placement, 1)) return;
         graphics.pose().pushMatrix();
         graphics.pose().translate(left, top);
         graphics.pose().scale(scale, scale);
         boolean thinking = elapsedMillis >= 0;
         drawPanelBackground(graphics, size[0], size[1], thinking ? ThinkingAnimation.PURPLE : GREEN);
         if (thinking) {
-            ThinkingAnimation.draw(graphics, font, ACCENT_WIDTH + PAD, PAD, elapsedMillis, model);
+            ThinkingAnimation.draw(graphics, font, ACCENT_WIDTH + PAD, PAD, elapsedMillis, model, fgAlpha);
         }
         else { // graded: waiting for the minimum play time, or for the player to be free
             String text = secondsUntilReturn > 0 ? "Graded · your card is back in " + secondsUntilReturn + "s" : "Graded · your card is coming back";
             int textWidth = font.width("✔ " + text);
             int x = ACCENT_WIDTH + (size[0] - ACCENT_WIDTH - textWidth) / 2;
             int y = (size[1] - font.lineHeight) / 2 + 1;
-            graphics.text(font, "✔ ", x, y, GREEN, true);
-            graphics.text(font, text, x + font.width("✔ "), y, CommonColors.WHITE, true);
+            graphics.text(font, "✔ ", x, y, fg(GREEN), true);
+            graphics.text(font, text, x + font.width("✔ "), y, fg(CommonColors.WHITE), true);
         }
         graphics.pose().popMatrix();
     }
@@ -367,6 +432,7 @@ public final class StudyHud {
         float scale = placement.scale().floatValue();
         int left = placement.left(graphics.guiWidth(), width);
         int top = placement.top(graphics.guiHeight(), height);
+        if (!useLook(placement, 1)) return;
         graphics.pose().pushMatrix();
         graphics.pose().translate(left, top);
         graphics.pose().scale(scale, scale);
@@ -379,23 +445,23 @@ public final class StudyHud {
         // badge: the grade in a pill of its colour, then the score
         int badgeWidth = font.width(status.label()) + 10;
         int badgeHeight = badgeHeight(font);
-        graphics.fill(x, y, x + badgeWidth, y + badgeHeight, withAlpha(status.color(), 0x40));
-        graphics.outline(x, y, badgeWidth, badgeHeight, withAlpha(status.color(), 0xC0));
-        graphics.text(font, status.label(), x + 5, y + 3, status.color(), true);
+        graphics.fill(x, y, x + badgeWidth, y + badgeHeight, fg(withAlpha(status.color(), 0x40)));
+        graphics.outline(x, y, badgeWidth, badgeHeight, fg(withAlpha(status.color(), 0xC0)));
+        graphics.text(font, status.label(), x + 5, y + 3, fg(status.color()), true);
         if (status.score() >= 0) {
-            graphics.text(font, String.format(java.util.Locale.ROOT, "%.2f", status.score()), x + badgeWidth + 6, y + 3, CommonColors.WHITE, true);
+            graphics.text(font, String.format(java.util.Locale.ROOT, "%.2f", status.score()), x + badgeWidth + 6, y + 3, fg(CommonColors.WHITE), true);
         }
 
         // right side: what happens next, with one pip per second of the countdown
         int textX = right - font.width(status.right());
-        graphics.text(font, status.right(), textX, y + 3, GRAY, true);
+        graphics.text(font, status.right(), textX, y + 3, fg(GRAY), true);
         if (status.progress() >= 0 && status.totalSeconds() <= MAX_PIPS) {
             int pipsWidth = status.totalSeconds() * (PIP + PIP_GAP) - PIP_GAP;
             int pipX = textX - 6 - pipsWidth;
             int pipY = y + (badgeHeight - PIP) / 2;
             for (int i = 0; i < status.totalSeconds(); i++) {
                 boolean left_ = i < status.secondsLeft();
-                graphics.fill(pipX, pipY, pipX + PIP, pipY + PIP, left_ ? status.color() : 0x40FFFFFF);
+                graphics.fill(pipX, pipY, pipX + PIP, pipY + PIP, fg(left_ ? status.color() : 0x40FFFFFF));
                 pipX += PIP + PIP_GAP;
             }
         }
@@ -412,18 +478,18 @@ public final class StudyHud {
                 int from = x + (int) Math.round(edges[band] * meterWidth);
                 int to = x + (int) Math.round(edges[band + 1] * meterWidth);
                 if (to <= from) continue;
-                graphics.fill(from, y, to - (band < 3 ? 1 : 0), y + METER_HEIGHT, withAlpha(BAND_COLORS[band], band == reached ? 0xFF : 0x50));
+                graphics.fill(from, y, to - (band < 3 ? 1 : 0), y + METER_HEIGHT, fg(withAlpha(BAND_COLORS[band], band == reached ? 0xFF : 0x50)));
             }
             int marker = x + (int) Math.round(Math.min(1, Math.max(0, status.score())) * (meterWidth - 2));
-            graphics.fill(marker - 1, y - 2, marker + 3, y + METER_HEIGHT + 2, 0xFF000000);
-            graphics.fill(marker, y - 2, marker + 2, y + METER_HEIGHT + 2, CommonColors.WHITE);
+            graphics.fill(marker - 1, y - 2, marker + 3, y + METER_HEIGHT + 2, fg(0xFF000000));
+            graphics.fill(marker, y - 2, marker + 2, y + METER_HEIGHT + 2, fg(CommonColors.WHITE));
             y += METER_HEIGHT;
         }
 
         // the start of the explanation
         y += 5;
         for (FormattedCharSequence line : wrap(font, status.text())) {
-            graphics.text(font, line, x, y, CommonColors.WHITE, true);
+            graphics.text(font, line, x, y, fg(CommonColors.WHITE), true);
             y += font.lineHeight;
         }
 
@@ -433,20 +499,20 @@ public final class StudyHud {
         if (key != null) {
             int capWidth = Math.max(font.width(key) + 7, keyCapHeight(font));
             int capHeight = keyCapHeight(font);
-            graphics.fill(x, y, x + capWidth, y + capHeight, 0xFF2A2D36);
-            graphics.outline(x, y, capWidth, capHeight, 0xFF8A8F99);
-            graphics.fill(x + 1, y + capHeight - 2, x + capWidth - 1, y + capHeight - 1, 0xFF1A1C22); // a little depth
-            graphics.text(font, key, x + (capWidth - font.width(key)) / 2, y + 2, CommonColors.WHITE, false);
-            graphics.text(font, status.keyAction(), x + capWidth + 5, y + 2, GRAY, true);
+            graphics.fill(x, y, x + capWidth, y + capHeight, fg(0xFF2A2D36));
+            graphics.outline(x, y, capWidth, capHeight, fg(0xFF8A8F99));
+            graphics.fill(x + 1, y + capHeight - 2, x + capWidth - 1, y + capHeight - 1, fg(0xFF1A1C22)); // a little depth
+            graphics.text(font, key, x + (capWidth - font.width(key)) / 2, y + 2, fg(CommonColors.WHITE), false);
+            graphics.text(font, status.keyAction(), x + capWidth + 5, y + 2, fg(GRAY), true);
         }
         else {
-            graphics.text(font, "Set \"Open graded card\" in Controls to open it", x, y + 2, DIM, true);
+            graphics.text(font, "Set \"Open graded card\" in Controls to open it", x, y + 2, fg(DIM), true);
         }
 
         // countdown along the bottom edge
         if (status.progress() >= 0) {
             int barWidth = Math.round((width - ACCENT_WIDTH) * Math.min(1, status.progress()));
-            graphics.fill(ACCENT_WIDTH, height - 2, ACCENT_WIDTH + barWidth, height, status.color());
+            graphics.fill(ACCENT_WIDTH, height - 2, ACCENT_WIDTH + barWidth, height, fg(status.color()));
         }
         graphics.pose().popMatrix();
     }

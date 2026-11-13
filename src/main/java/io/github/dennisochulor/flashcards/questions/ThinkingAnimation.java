@@ -35,6 +35,11 @@ public final class ThinkingAnimation {
     private static @Nullable String lineModel = null;
     private static long lineFrame = -1;
     private static Component line = Component.empty();
+    private static float alpha = 1f; // set by draw(), read by fg()
+
+    private static int fg(int color) {
+        return ((int) (((color >>> 24) & 0xFF) * alpha) << 24) | (color & 0x00FFFFFF);
+    }
 
     /** Width that fits every step, so the animation doesn't jump around as the text changes. */
     public static int width(Font font, String model) {
@@ -53,6 +58,12 @@ public final class ThinkingAnimation {
 
     /** Draws the animation with its top-left corner at (x, y), {@link #width} wide. */
     public static void draw(GuiGraphicsExtractor graphics, Font font, int x, int y, long elapsedMillis, String model) {
+        draw(graphics, font, x, y, elapsedMillis, model, 1f);
+    }
+
+    /** @param alpha how strongly to draw it, 0-1 (the HUD's "text & colours" setting) */
+    public static void draw(GuiGraphicsExtractor graphics, Font font, int x, int y, long elapsedMillis, String model, float alpha) {
+        ThinkingAnimation.alpha = Math.max(0, Math.min(1, alpha));
         int width = width(font, model);
         long frame = elapsedMillis / FRAME_MILLIS;
         if (frame != lineFrame || !model.equals(lineModel)) {
@@ -66,15 +77,15 @@ public final class ThinkingAnimation {
             lineFrame = frame;
             lineModel = model;
         }
-        graphics.text(font, line, x, y, CommonColors.WHITE, true);
+        graphics.text(font, line, x, y, fg(CommonColors.WHITE), true);
 
         // indeterminate progress bar: a glowing segment gliding back and forth
         int barY = y + font.lineHeight + BAR_GAP;
-        graphics.fill(x, barY, x + width, barY + BAR_HEIGHT, 0x40FFFFFF);
+        graphics.fill(x, barY, x + width, barY + BAR_HEIGHT, fg(0x40FFFFFF));
         int segment = Math.max(12, width / 4);
         double t = (Math.sin(elapsedMillis / 450.0) + 1) / 2; // 0..1..0
         int segX = x + (int) (t * (width - segment));
-        graphics.fill(segX, barY, segX + segment, barY + BAR_HEIGHT, PURPLE);
-        graphics.fill(segX + segment / 4, barY, segX + segment * 3 / 4, barY + BAR_HEIGHT, PURPLE_CORE);
+        graphics.fill(segX, barY, segX + segment, barY + BAR_HEIGHT, fg(PURPLE));
+        graphics.fill(segX + segment / 4, barY, segX + segment * 3 / 4, barY + BAR_HEIGHT, fg(PURPLE_CORE));
     }
 }

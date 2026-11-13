@@ -251,7 +251,16 @@ A small panel shows:
 - how many cards you answered this session (correct ✔ / wrong ✘),
 - in Anki mode: cards reviewed today in Anki (all devices) and what's still **Due** in your deck as three numbers in Anki's own colours and order: blue = new, red = learning, green = to review (after Anki's daily limits).
 
-**Moving and resizing:** Flashcards config → **HUD Layout...** Drag any of the three panels (the study panel, the AI thinking indicator, the AI result panel) anywhere; Tab switches between them; scroll over one (or press `+` / `-`) to resize it from 50% to 300%; arrow keys nudge by a pixel (Shift = 10). Panels snap to the screen's centre lines and can't leave the screen, and they keep their relative position if you resize the window. **Reset** puts all three back.
+**Moving and resizing:** Flashcards config → **HUD Layout...** Drag any of the three panels (the study panel, the AI thinking indicator, the AI result panel) anywhere; Tab switches between them; scroll over one (or press `+` / `-`) to resize it from 50% to 300%; arrow keys nudge by a pixel (Shift = 10). Panels snap to the screen's centre lines and can't leave the screen, and they keep their relative position if you resize the window. **Reset** puts all three back, with the normal look.
+
+**Making it less distracting:** the sliders at the bottom of HUD Layout change the look of the selected panel (click a panel to choose it):
+
+| Setting | Panels | What it does | Default |
+|---|---|---|---|
+| **Background** | all | how solid the dark panel behind the text is; 0 leaves just the text over the world | 80% |
+| **Text & colours** | all | how strong the text, colours and bars are | 100% |
+| **When idle** | study panel | how visible it stays while nothing is happening (the next card is more than 10 seconds away); it fades back in when a card is close or waiting. 0% hides it until then. Hover the slider to preview the idle look | no change |
+| **Show** | study panel | *Everything*, *Timer and session* (no Anki numbers), or *Timer only*. A card that's waiting always says why | Everything |
 
 ### Card keys
 Flashcards config → **General... → Card Keys...** Click a key button and press the new key (Esc cancels).
