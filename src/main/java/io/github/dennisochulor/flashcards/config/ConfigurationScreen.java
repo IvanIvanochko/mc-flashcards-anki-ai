@@ -37,9 +37,11 @@ public class ConfigurationScreen extends Screen {
             .tooltip(Tooltip.create(Component.literal("Your own question lists (used when Anki mode is off)"))).build();
     private final Button doneButton = Button.builder(Component.literal("Done"), _ -> this.onClose()).build();
     private final Button generalConfigButton = Button.builder(Component.literal("General..."),_ -> Minecraft.getInstance().gui.setScreen(new GeneralConfigScreen()))
-            .tooltip(Tooltip.create(Component.literal("Answer checking, real time or game time, HUD on/off"))).build();
-    private final Button rewardsButton = Button.builder(Component.literal("Rewards & Penalties..."), _ -> Minecraft.getInstance().gui.setScreen(new RewardsConfigScreen()))
+            .tooltip(Tooltip.create(Component.literal("Answer checking, real time or game time, HUD on/off, card keys"))).build();
+    private final Button rewardsButton = Button.builder(Component.literal("Rewards & Penalties..."), _ -> Minecraft.getInstance().gui.setScreen(RewardsConfigScreen.forMain()))
             .tooltip(Tooltip.create(Component.literal("Optional: commands that run when you answer right or wrong, with presets"))).build();
+    private final Button deckPresetsButton = Button.builder(Component.literal("Deck Presets..."), _ -> Minecraft.getInstance().gui.setScreen(new DeckPresetsScreen()))
+            .tooltip(Tooltip.create(Component.literal("Give each Anki deck its own AI model, grading prompt and rewards"))).build();
     private final Button hudLayoutButton = Button.builder(Component.literal("HUD Layout..."), _ -> Minecraft.getInstance().gui.setScreen(new HudLayoutScreen()))
             .tooltip(Tooltip.create(Component.literal("Move and resize the study panel and the AI thinking indicator"))).build();
     private final Button ankiConfigButton = Button.builder(Component.literal("Anki Sync..."), _ -> Minecraft.getInstance().gui.setScreen(new AnkiConfigScreen()))
@@ -105,6 +107,10 @@ public class ConfigurationScreen extends Screen {
 
     @Override
     protected void init() {
+        doneButton.setTooltip(Tooltip.create(Component.literal("Save and close")));
+        intervalButton.setTooltip(Tooltip.create(Component.literal("ON: a question pops up each time the interval runs out.\nOFF: questions only appear when you press the \"Prompt a question\" key.")));
+        statsButton.setTooltip(Tooltip.create(Component.literal("Your all-time totals: questions answered, right and wrong")));
+        intervalTextField.setTooltip(Tooltip.create(Component.literal("Minutes between questions")));
         config = FileManager.getConfig(); // avoid overriding config updates of nested screens
         titleText.setPosition(width/2 - titleText.getWidth()/2,15);
         // "Prompt a question every [3] min [0] sec [ON]", centered
@@ -137,11 +143,13 @@ public class ConfigurationScreen extends Screen {
         ankiConfigButton.setRectangle(columnWidth,20,left,y);
         aiGradingButton.setRectangle(columnWidth,20,right,y);
         y += rowHeight;
-        rewardsButton.setRectangle(columnWidth,20,left,y);
-        hudLayoutButton.setRectangle(columnWidth,20,right,y);
+        deckPresetsButton.setRectangle(columnWidth,20,left,y);
+        rewardsButton.setRectangle(columnWidth,20,right,y);
         y += rowHeight;
-        generalConfigButton.setRectangle(columnWidth,20,left,y);
-        statsButton.setRectangle(columnWidth,20,right,y);
+        hudLayoutButton.setRectangle(columnWidth,20,left,y);
+        generalConfigButton.setRectangle(columnWidth,20,right,y);
+        y += rowHeight;
+        statsButton.setRectangle(columnWidth,20,width/2 - columnWidth/2,y);
         doneButton.setRectangle(100,20,width/2 - 50,Math.max(y + rowHeight + 6, height - 30));
 
         addRenderableOnly(titleText);
@@ -155,6 +163,7 @@ public class ConfigurationScreen extends Screen {
         if (canOpenFolder) addRenderableWidget(openFlashcardsFolderButton);
         addRenderableWidget(ankiConfigButton);
         addRenderableWidget(aiGradingButton);
+        addRenderableWidget(deckPresetsButton);
         addRenderableWidget(rewardsButton);
         addRenderableWidget(hudLayoutButton);
         addRenderableWidget(generalConfigButton);

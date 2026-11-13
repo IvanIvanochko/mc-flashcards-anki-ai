@@ -8,6 +8,7 @@ import java.util.Objects;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.layouts.FrameLayout;
@@ -45,6 +46,7 @@ class CategoryEditScreen extends Screen {
 
     @Override
     public void init() {
+        doneButton.setTooltip(Tooltip.create(Component.literal("Keep this name and go back")));
         textField.setMaxLength(10);
         textField.setResponder(text -> doneButton.active = !text.isBlank());
         warningText.visible = false;

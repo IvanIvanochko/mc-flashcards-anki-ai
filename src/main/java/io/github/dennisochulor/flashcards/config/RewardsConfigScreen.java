@@ -15,12 +15,15 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.CommonColors;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
 /**
  * Optional rewards for right answers and penalties for wrong ones, as commands run on the player.
+ * Edits either the main set or one deck's own set (which can also be "Same as main").
+ * <p>
  * Presets fill in the command boxes; editing a box (or the mode) turns the preset into "Custom",
  * and what you typed under Custom is kept while you browse the other presets.
  */
@@ -28,10 +31,20 @@ class RewardsConfigScreen extends Screen {
     private static final int WIDTH = 350;
     private static final int GRAY = 0xFFAAAAAA;
 
-    private final Screen parent;
-    private final ModConfig config = FileManager.getConfig();
+    /** A set of reward/penalty commands and how they're picked. */
+    record Rewards(List<String> correct, List<String> wrong, ModConfig.CommandSelectionStrategy strategy, String presetName) {}
 
-    private final StringWidget title = new StringWidget(Component.literal("Rewards & Penalties"), Minecraft.getInstance().font);
+    /** Receives the result when the screen closes. {@code sameAsMain} is only ever true for a deck. */
+    interface Saver {
+        void save(boolean sameAsMain, Rewards rewards);
+    }
+
+    private final Screen parent;
+    private final boolean deckMode;
+    private final Rewards main; // what "Same as main" shows (deck mode only)
+    private final Saver saver;
+
+    private final StringWidget title;
     private final MultiLineTextWidget description = new MultiLineTextWidget(Component.empty(), Minecraft.getInstance().font);
     private final StringWidget correctLabel = new StringWidget(
             Component.literal("Right answer").withColor(CommonColors.GREEN).append(Component.literal("  (in Anki mode: Hard, Good or Easy)").withColor(GRAY)),
@@ -60,34 +73,87 @@ class RewardsConfigScreen extends Screen {
     private String customCorrect, customWrong;
     private ModConfig.CommandSelectionStrategy customMode;
 
-    protected RewardsConfigScreen() {
-        super(Component.literal("Rewards & Penalties"));
-        parent = Objects.requireNonNull(Minecraft.getInstance().gui.screen());
+    /** The main rewards and penalties. */
+    static RewardsConfigScreen forMain() {
+        ModConfig config = FileManager.getConfig();
+        Rewards current = new Rewards(config.correctAnswerCommands(), config.wrongAnswerCommands(), config.commandSelectionStrategy(), config.rewardPreset());
+        return new RewardsConfigScreen("Rewards & Penalties", false, false, current, current,
+                (_, rewards) -> FileManager.updateConfig(FileManager.getConfig()
+                        .withCommands(rewards.correct(), rewards.wrong(), rewards.strategy(), rewards.presetName())));
+    }
 
-        RewardPreset saved = RewardPreset.byName(config.rewardPreset());
-        preset = saved.matches(config.correctAnswerCommands(), config.wrongAnswerCommands(), config.commandSelectionStrategy())
-                || (saved == RewardPreset.NONE && config.commandSelectionStrategy() == ModConfig.CommandSelectionStrategy.OFF)
-                ? saved : RewardPreset.CUSTOM;
-        customCorrect = String.join("\n", config.correctAnswerCommands());
-        customWrong = String.join("\n", config.wrongAnswerCommands());
-        customMode = config.commandSelectionStrategy();
+    /**
+     * One deck's rewards and penalties.
+     * @param sameAsMain whether the deck currently just uses the main set
+     * @param current    the deck's own set (ignored when {@code sameAsMain})
+     */
+    static RewardsConfigScreen forDeck(String deckLabel, boolean sameAsMain, Rewards current, Saver saver) {
+        ModConfig config = FileManager.getConfig();
+        Rewards main = new Rewards(config.correctAnswerCommands(), config.wrongAnswerCommands(), config.commandSelectionStrategy(), config.rewardPreset());
+        return new RewardsConfigScreen("Rewards & Penalties · " + deckLabel, true, sameAsMain, current, main, saver);
+    }
 
+    private RewardsConfigScreen(String titleText, boolean deckMode, boolean sameAsMain, Rewards current, Rewards main, Saver saver) {
+        super(Component.literal(titleText));
+        this.parent = Objects.requireNonNull(Minecraft.getInstance().gui.screen());
+        this.deckMode = deckMode;
+        this.main = main;
+        this.saver = saver;
+        this.title = new StringWidget(Component.literal(titleText), Minecraft.getInstance().font);
+
+        if (sameAsMain) {
+            preset = RewardPreset.SAME_AS_MAIN;
+            customCorrect = "";
+            customWrong = "";
+            customMode = ModConfig.CommandSelectionStrategy.EXECUTE_ALL;
+        }
+        else {
+            RewardPreset saved = RewardPreset.byName(current.presetName());
+            preset = saved.matches(current.correct(), current.wrong(), current.strategy()) ? saved : RewardPreset.CUSTOM;
+            customCorrect = String.join("\n", current.correct());
+            customWrong = String.join("\n", current.wrong());
+            customMode = current.strategy();
+        }
+
+        List<RewardPreset> presets = new ArrayList<>();
+        if (deckMode) presets.add(RewardPreset.SAME_AS_MAIN);
+        presets.addAll(RewardPreset.ALL);
         presetButton = new CycleButton.Builder<RewardPreset>(p -> Component.literal(p.name()), () -> preset)
-                .withValues(RewardPreset.ALL)
+                .withValues(presets)
                 .withTooltip(p -> Tooltip.create(Component.literal(p.description())))
                 .create(0, 0, 200, 20, Component.literal("Preset"), (_, value) -> selectPreset(value));
-        modeButton = new CycleButton.Builder<ModConfig.CommandSelectionStrategy>(strategy -> Component.literal(strategy.friendlyName), config::commandSelectionStrategy)
+        modeButton = new CycleButton.Builder<ModConfig.CommandSelectionStrategy>(strategy -> Component.literal(strategy.friendlyName), () -> customMode)
                 .withValues(List.of(ModConfig.CommandSelectionStrategy.values()))
                 .withTooltip(strategy -> strategy.tooltip)
                 .create(0, 0, WIDTH - 200 - 4, 20, Component.literal("Mode"), (_, _) -> edited());
 
         description.setMaxWidth(WIDTH).setCentered(true);
         note.setMaxWidth(WIDTH).setCentered(true);
-        correctBox.setValue(customCorrect);
-        wrongBox.setValue(customWrong);
         correctBox.setValueListener(_ -> edited());
         wrongBox.setValueListener(_ -> edited());
+        show(preset);
         updateDescription();
+    }
+
+    /** Fills the boxes and the mode with what the given preset means, without that counting as an edit. */
+    private void show(RewardPreset shown) {
+        applying = true;
+        if (shown == RewardPreset.CUSTOM) {
+            correctBox.setValue(customCorrect);
+            wrongBox.setValue(customWrong);
+            modeButton.setValue(customMode);
+        }
+        else if (shown == RewardPreset.SAME_AS_MAIN) {
+            correctBox.setValue(String.join("\n", main.correct()));
+            wrongBox.setValue(String.join("\n", main.wrong()));
+            modeButton.setValue(main.strategy());
+        }
+        else {
+            correctBox.setValue(String.join("\n", shown.correct()));
+            wrongBox.setValue(String.join("\n", shown.wrong()));
+            modeButton.setValue(shown.strategy());
+        }
+        applying = false;
     }
 
     private void selectPreset(RewardPreset selected) {
@@ -97,18 +163,7 @@ class RewardsConfigScreen extends Screen {
             customMode = modeButton.getValue();
         }
         preset = selected;
-        applying = true;
-        if (selected == RewardPreset.CUSTOM) {
-            correctBox.setValue(customCorrect);
-            wrongBox.setValue(customWrong);
-            modeButton.setValue(customMode);
-        }
-        else {
-            correctBox.setValue(String.join("\n", selected.correct()));
-            wrongBox.setValue(String.join("\n", selected.wrong()));
-            modeButton.setValue(selected.strategy());
-        }
-        applying = false;
+        show(selected);
         updateDescription();
         rebuildWidgets(); // the description may need more or fewer lines
     }
@@ -129,6 +184,7 @@ class RewardsConfigScreen extends Screen {
 
     @Override
     public void init() {
+        doneButton.setTooltip(Tooltip.create(Component.literal("Save these rewards and penalties and go back")));
         int boxHeight = Math.max(36, (int) (this.height * 0.17));
         correctBox.setHeight(boxHeight);
         correctBox.refreshScrollAmount(); // prevent weird scrollbar overflow
@@ -161,10 +217,11 @@ class RewardsConfigScreen extends Screen {
 
     @Override
     public void onClose() {
-        List<String> correct = Arrays.asList(correctBox.getValue().split("\n"));
-        List<String> wrong = Arrays.asList(wrongBox.getValue().split("\n"));
-        FileManager.updateConfig(FileManager.getConfig().withCommands(correct, wrong, modeButton.getValue(),
-                preset == RewardPreset.CUSTOM ? "" : preset.name()));
+        List<String> correct = ModConfig.cleanCommands(Arrays.asList(correctBox.getValue().split("\n")));
+        List<String> wrong = ModConfig.cleanCommands(Arrays.asList(wrongBox.getValue().split("\n")));
+        boolean named = preset != RewardPreset.CUSTOM && preset != RewardPreset.SAME_AS_MAIN;
+        saver.save(deckMode && preset == RewardPreset.SAME_AS_MAIN,
+                new Rewards(correct, wrong, modeButton.getValue(), named ? preset.name() : ""));
         Minecraft.getInstance().gui.setScreen(parent);
     }
 }

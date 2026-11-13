@@ -4,6 +4,8 @@ import io.github.dennisochulor.flashcards.FileManager;
 import io.github.dennisochulor.flashcards.IntSlider;
 import io.github.dennisochulor.flashcards.ScoreSlider;
 import io.github.dennisochulor.flashcards.ai.AiGrader;
+import io.github.dennisochulor.flashcards.ai.GradingPrompt;
+import io.github.dennisochulor.flashcards.ai.Ollama;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
@@ -15,6 +17,10 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.CommonColors;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 class AiGradingConfigScreen extends Screen {
@@ -74,6 +80,23 @@ class AiGradingConfigScreen extends Screen {
             .tooltip(Tooltip.create(Component.literal("Move and resize the \"AI is thinking\" animation that shows while you keep playing.")))
             .size(WIDGET_WIDTH / 2 - 2, 20).build();
 
+    private final Button promptButton = Button.builder(Component.empty(), _ -> Minecraft.getInstance().gui.setScreen(
+                    new PromptEditorScreen("AI prompt", FileManager.getConfig().aiGrading().prompt(), GradingPrompt.DEFAULT_TEMPLATE, "built-in",
+                            text -> FileManager.updateConfig(FileManager.getConfig().withAiGrading(FileManager.getConfig().aiGrading().withPrompt(text))))))
+            .tooltip(Tooltip.create(Component.literal(
+                    "Read or rewrite the whole set of instructions the AI grades by (there's a reset button).\n"
+                    + "To tune grading for one deck you usually don't need this: give the deck a few notes in main config → Deck Presets...")))
+            .build();
+
+    private final Button performanceButton = Button.builder(Component.literal("Memory & performance..."), _ -> {
+                saveModelChoice(); // so that screen measures the model picked here
+                modelMayHaveChanged = true; // ...and it can switch to a model that fits
+                Minecraft.getInstance().gui.setScreen(new AiPerformanceScreen());
+            })
+            .tooltip(Tooltip.create(Component.literal(
+                    "How much RAM the AI may use, how long the model stays loaded, and a live picture of where your memory is going.")))
+            .build();
+
     private final MultiLineTextWidget helpText = new MultiLineTextWidget(Component.literal(
             "Needs the Ollama app running (ollama.com) with a model downloaded, e.g. \"ollama pull qwen2.5:7b\".")
             .withColor(GRAY), Minecraft.getInstance().font);
@@ -81,6 +104,9 @@ class AiGradingConfigScreen extends Screen {
     private final Button doneButton = Button.builder(Component.literal("Done"), _ -> this.onClose()).size(100, 20).build();
 
     private String selectedModel = ai.model();
+    private final Map<String, Long> modelSizes = new HashMap<>();
+    private List<String> modelNames = List.of();
+    private boolean modelMayHaveChanged = false;
     private boolean initialized = false;
     private int leftColumnX = 0;
     private int columnWidth = WIDGET_WIDTH;
@@ -99,6 +125,15 @@ class AiGradingConfigScreen extends Screen {
         modelList = new DeckListWidget(WIDGET_WIDTH, 100, 0, model -> {
             selectedModel = model;
             updateModelLabel();
+        });
+        // each model's rough RAM need, green if it fits the AI memory budget (Memory & performance...)
+        modelList.setDetail(model -> {
+            Long bytes = modelSizes.get(model);
+            return bytes == null || bytes <= 0 ? "" : "~" + SystemMemory.formatGb(SystemMemory.estimateModelBytes(bytes));
+        }, model -> {
+            Long bytes = modelSizes.get(model);
+            double budgetGb = FileManager.getConfig().aiGrading().performance().memoryBudgetGb();
+            return bytes != null && SystemMemory.estimateModelBytes(bytes) <= budgetGb * SystemMemory.GB ? CommonColors.GREEN : CommonColors.SOFT_YELLOW;
         });
 
         hardSlider = new ScoreSlider(SLIDER_WIDTH, 20, "Hard ", ai.hardFrom(), v -> {
@@ -149,12 +184,19 @@ class AiGradingConfigScreen extends Screen {
         connectButton.active = false;
         setStatus(Component.literal("Connecting to Ollama...").withColor(GRAY));
 
-        AiGrader.loadModels(url(), models -> {
+        AiGrader.loadModels(url(), infos -> {
             connectButton.active = true;
+            modelSizes.clear();
+            List<String> models = new ArrayList<>();
+            for (Ollama.ModelInfo info : infos) {
+                models.add(info.name());
+                modelSizes.put(info.name(), info.fileBytes());
+            }
             if (selectedModel.isBlank() && models.size() == 1) {
                 selectedModel = models.getFirst();
                 updateModelLabel();
             }
+            modelNames = models;
             modelList.setDecks(models, selectedModel);
             if (models.isEmpty()) {
                 setStatus(Component.literal("Connected, but no models are installed. Run \"ollama pull qwen2.5:7b\".").withColor(CommonColors.SOFT_YELLOW));
@@ -182,7 +224,14 @@ class AiGradingConfigScreen extends Screen {
      */
     @Override
     protected void init() {
+        doneButton.setTooltip(Tooltip.create(Component.literal("Save these settings and go back")));
         initialized = true;
+        if (modelMayHaveChanged) { // back from Memory & performance
+            modelMayHaveChanged = false;
+            selectedModel = FileManager.getConfig().aiGrading().model();
+            modelList.setDecks(modelNames, selectedModel);
+            updateModelLabel();
+        }
         int gap = 10;
         columnWidth = Math.max(150, Math.min(240, (width - 20 - gap) / 2));
         leftColumnX = width / 2 - gap / 2 - columnWidth;
@@ -235,6 +284,12 @@ class AiGradingConfigScreen extends Screen {
         autoKeepPlayingButton.setRectangle(columnWidth, 20, rightX, y);
         y += 24;
         indicatorButton.setRectangle(columnWidth, 20, rightX, y);
+        y += 24;
+        promptButton.setMessage(Component.literal("AI prompt: " + (FileManager.getConfig().aiGrading().prompt().isBlank() ? "Default" : "Own") + "..."));
+        promptButton.setRectangle(columnWidth, 20, rightX, y);
+        y += 24;
+        performanceButton.setRectangle(columnWidth, 20, rightX, y);
+        boolean roomForHelp = y + 20 + 2 <= helpY; // on very small windows the settings matter more than the help line
 
         addRenderableWidget(titleText);
         addRenderableWidget(enabledButton);
@@ -253,15 +308,27 @@ class AiGradingConfigScreen extends Screen {
         addRenderableWidget(minPlaySlider);
         addRenderableWidget(autoKeepPlayingButton);
         addRenderableWidget(indicatorButton);
-        addRenderableWidget(helpText);
+        addRenderableWidget(promptButton);
+        addRenderableWidget(performanceButton);
+        if (roomForHelp) addRenderableWidget(helpText);
         addRenderableWidget(doneButton);
+    }
+
+    /** Saves just the picked model right away, for screens opened from here that look at it. */
+    private void saveModelChoice() {
+        ModConfig config = FileManager.getConfig();
+        if (!config.aiGrading().model().equals(selectedModel)) {
+            FileManager.updateConfig(config.withAiGrading(config.aiGrading().withModel(selectedModel)));
+        }
     }
 
     @Override
     public void onClose() {
         ModConfig.AiGrading newAi = new ModConfig.AiGrading(enabledButton.getValue(), url(), selectedModel,
                 hardSlider.score(), goodSlider.score(), easySlider.score(), adjustButton.getValue(),
-                quitAfterSlider.intValue(), minPlaySlider.intValue(), autoKeepPlayingButton.getValue());
+                quitAfterSlider.intValue(), minPlaySlider.intValue(), autoKeepPlayingButton.getValue(),
+                FileManager.getConfig().aiGrading().prompt(),        // saved by its own editor
+                FileManager.getConfig().aiGrading().performance());  // saved by its own screen
         FileManager.updateConfig(FileManager.getConfig().withAiGrading(newAi)); // written to config/flashcards, so it survives restarts
         Minecraft.getInstance().gui.setScreen(parent);
     }

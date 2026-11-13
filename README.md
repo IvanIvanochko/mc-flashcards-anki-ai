@@ -5,15 +5,36 @@ By [**IvanIvanochko**](https://github.com/IvanIvanochko). A fork of [Flashcards]
 
 ## What this edition adds
 - **Anki mode**: cards come from your real Anki deck and your answers are saved as real Anki reviews (Again / Hard / Good / Easy), so your spaced-repetition schedule keeps working while you play. Optional AnkiWeb sync on join/leave.
-- **AI grading**: type your answer and a local AI grades it by meaning, with a key-point checklist and an explanation. The score unlocks Anki's buttons. One second chance for answers that are on the right track but too vague.
+- **AI grading**: type your answer and a local AI grades it by meaning, with a key-point checklist, a score meter and an explanation. The score unlocks Anki's buttons. One second chance for answers that are on the right track but too vague.
 - **Play while the AI thinks**: leave a slow grading with Space and keep playing; the card comes back when it's graded.
+- **Deck presets**: each Anki deck can have its own AI model, notes for the AI, rewards and time between cards.
+- **Deck notes without prompt-writing**: tell the AI about a deck in a few sentences, with a guided form, a ready-made request for any AI, or your local AI writing them for you.
+- **Editable AI prompt**: read or rewrite the whole set of instructions the AI grades by.
+- **AI memory controls**: profiles and sliders for how much RAM the AI may use and how long the model stays loaded, with a live picture of your computer's memory.
+- **Rewards & penalties**: optional commands for right and wrong answers, with presets from "Gentle" to "Learn or Die" that you can edit.
 - **Readable cards**: normal-size text in a scrollable panel, images, and LaTeX/MathJax formulas converted to Unicode.
 - **Timer & stats HUD**: countdown to the next card, session stats, Anki's due counts. Drag it anywhere and resize it.
-- **Rewards & penalties**: optional commands for right and wrong answers, with presets from "Gentle" to "Learn or Die" that you can edit.
+- **Card keys you can change**, and protection against stray key presses: a card that pops up while you're running and jumping can't be skipped by the Space you were already pressing.
 - **Real time or game time** for the question timer, and intervals in minutes **and seconds**.
 - Searchable deck and model lists.
 
 Everything from the original mod still works too: your own question lists and automatic/manual answer checking.
+
+## Where everything is
+Open the config with `H` (or through Mod Menu). The main screen has the question interval ("Prompt a question every [N] min [N] sec", ON/OFF) and these buttons:
+
+| Button | What's inside |
+|---|---|
+| **Edit Questions** / **Open Folder** | the mod's own question lists (used when Anki mode is off) and its files |
+| **Anki Sync...** | turn Anki mode on, pick your deck, AnkiWeb sync |
+| **AI Grading...** | turn AI grading on, pick the model, score cut-offs, "keep playing" settings, **AI prompt...**, **Memory & performance...** |
+| **Deck Presets...** | per-deck AI model, notes for the AI (and, advanced, a whole prompt), rewards and time between cards |
+| **Rewards & Penalties...** | commands for right and wrong answers, with presets |
+| **HUD Layout...** | move and resize the study panel and the AI thinking indicator |
+| **General...** | answer checking for the mod's own questions, real time / game time, HUD on/off, **Card Keys...** |
+| **Stats** | your all-time totals |
+
+All settings are saved in `config/flashcards/config.json`, so they survive restarts.
 
 ## Requirements
 - Minecraft **26.3** with [Fabric Loader](https://fabricmc.net/) 0.19.3+ and [Fabric API](https://modrinth.com/mod/fabric-api). [Mod Menu](https://modrinth.com/mod/modmenu) is optional.
@@ -36,7 +57,7 @@ Everything runs on your computer. The mod only talks to Anki (AnkiConnect, `127.
 How it works:
 - Cards come from Anki's own review queue for that deck, so daily limits, learning steps and new cards behave exactly as in Anki.
 - The card is shown at normal text size in a panel that scrolls when it's long (mouse wheel, arrow keys, Page Up/Down, Home/End). When you reveal the answer of a long card, it jumps to the answer; scroll up to see the question again.
-- After **Show Answer** you grade with **Again / Hard / Good / Easy**, each showing Anki's next interval. Keys: Space/Enter shows the answer, 1-4 grades, Space/Enter = Good.
+- After **Show Answer** you grade with **Again / Hard / Good / Easy**, each showing Anki's next interval. Keys: Space/Enter shows the answer, 1-4 grades, Space/Enter = Good (all changeable, see [Card keys](#card-keys)).
 - **Again** counts as a wrong answer for [rewards and penalties](#rewards-and-penalties), the other buttons count as correct.
 - With **Sync with AnkiWeb on join/leave** ON, Anki syncs with AnkiWeb when you join and leave a world (you must be logged in to AnkiWeb inside Anki).
 - Question screens pause the game in singleplayer.
@@ -65,7 +86,7 @@ Setup:
 
 On a card:
 - Type your answer in the box. **Enter** checks it (Shift+Enter starts a new line). While the AI thinks you see what it's doing and a progress bar.
-- **Slow AI?** If it thinks longer than your limit (default 15 s), a **Keep playing** button appears in the bottom-right corner (or press **Space** / Esc). It closes the card and you play while the AI finishes, with a small "thinking" indicator on screen (just below the crosshair by default; move and resize it in **HUD Layout...**). When the grade is ready, the card comes back and the game pauses as usual, but never sooner than your minimum play time (default 5 s), and only once you've closed other menus and haven't just been hurt.
+- **Slow AI?** If it thinks longer than your limit (default 15 s), a **Keep playing** button appears in the bottom-right corner (or press **Space** / Esc; the key can be changed). It closes the card and you play while the AI finishes, with a small "thinking" indicator on screen (just below the crosshair by default; move and resize it in **HUD Layout...**). When the grade is ready, the card comes back and the game pauses as usual, but never sooner than your minimum play time (default 5 s), and only once you've closed other menus and haven't just been hurt.
 - With **Play while thinking** ON (default OFF) you're sent back to the game as soon as you check an answer, without waiting on the card.
 - **Show Answer** means "I don't know": you see the answer and only **Again** is available.
 - **Second chance:** if your answer is *on the right track but too vague* (something true is in it, it just isn't pinned down) and it would fail (Again), the AI tells you what to be more specific about (without giving the answer away) and you can try once more; your first answer stays in the box to extend. There's no third try: after the second answer you get the grade, whatever it is. "I don't know", excuses, off-topic and wrong answers don't get a second chance, they're simply Again.
@@ -90,16 +111,90 @@ Settings in **AI Grading...** (saved in `config/flashcards/config.json`, so they
 - **Play at least N s** (default 5): minimum time in the game before a graded card comes back.
 - **Play while thinking** (default OFF): go back to the game right away every time.
 - **Indicator layout...**: opens the HUD layout screen to move and resize the thinking animation shown while you play.
+- **AI prompt...**: read or rewrite the grading instructions, see [The AI prompt](#the-ai-prompt).
+- **Memory & performance...**: how much of your computer the AI may use, see [Memory and performance](#memory-and-performance).
+- The model list shows roughly how much RAM each model needs, green if it fits your AI memory budget.
 - **Adjusting score** (default OFF): when ON, a slider under the result lets you change the score if you disagree with the AI, which unlocks buttons accordingly.
 
 Small models sometimes misjudge, which is why Again is always available and score adjusting exists.
 
-**Speed and lag.** The AI runs on the same computer as the game, and on most machines (all Apple Silicon Macs) it uses the same graphics chip, so the game can stutter while the AI works. The mod keeps that as short as it can:
-- While you type, the model is loaded and reads its grading instructions, so the heaviest part is done before you're back in the game.
-- The model stays in memory for 30 minutes, and reasoning models (qwen3, deepseek-r1...) are told to skip their "thinking out loud" phase.
-- The reply is capped in length.
+### The AI prompt
+**AI Grading... → AI prompt** shows the full instructions the AI grades by, and lets you rewrite them. *Reset to built-in* brings the default back; while you haven't changed anything, you keep getting the improved default when the mod updates.
 
-If it still stutters, a smaller model (`qwen2.5:3b`, `llama3.2:3b`) helps the most, followed by lowering Minecraft's render distance.
+- `{hard}`, `{good}` and `{easy}` are replaced by your score cut-offs.
+- The *shape* of the AI's reply (key points, vague flag, grade, score, feedback) is enforced separately from the prompt, so rewording can change how answers are judged but can't break reading the grade.
+- Paste works (Ctrl/Cmd+V), so you can write the prompt in a normal text editor.
+
+You rarely need to touch this. To make the AI grade one deck better, give that deck **notes** instead (next section): a few sentences, and three ways to get them without writing a prompt.
+
+### Deck notes
+**Deck Presets... → pick a deck → AI deck notes...** A deck's notes are a few sentences that tell the AI about that deck: the subject and level, how strict to be, what an answer must contain, the language you answer in. They're *added* to the grading prompt under a heading that tells the AI they can't change the grades or the reply format, so the grading rules stay intact whatever the notes say.
+
+You can type them, or get them one of three ways. Every button on the screen says what it does when you hover it, and a status line tells you what just happened.
+
+| Button | What it does | AI involved |
+|---|---|---|
+| **1. Guided form...** | Asks a few questions: what the deck is about, what kind of cards it has (explanations, definitions, vocabulary, facts), how strict to be, whether formulas and exact numbers are required, and which language you answer in. The notes are put together from your answers and shown as you go. | none, works offline |
+| **2. Copy request for an AI** then **Paste the AI's answer** | Copies a ready-made message to your clipboard. It explains what deck notes are, gives the rules for writing them, and includes 8 sample cards spread across the deck (and whatever you've typed so far, to improve on). Paste it into any AI (ChatGPT, Claude, ...), copy what it answers, come back and press *Paste the AI's answer*, which also tidies the text (quotes, bullet points, "Here are your notes:"). | any AI you like; **pasting it into an online AI sends those sample cards to that service** |
+| **3. Write with local AI** | Your own Ollama model (the deck's model, or the main one) reads the same 8 sample cards and writes the notes straight into the box. A small local model writes simpler notes than a big online AI, so read them through. | local only, nothing leaves your computer |
+
+Also on the screen:
+- **Undo** brings back the text from before the last button changed it (press again to redo); **Clear** removes the notes.
+- **Whole prompt...** (advanced) replaces the *entire* grading prompt for this deck instead of adding notes. It opens as a copy of the main prompt for you to edit, with a reset button. Notes and a whole prompt can be used together; the notes are added to whichever prompt the deck uses.
+- Reading sample cards doesn't touch your Anki schedule. If Anki isn't reachable, the request is copied (or the local AI asked) without samples, and you're told so.
+
+What good notes look like (the guided form and the AI request both aim for this):
+- **Say what the deck is about**: "These cards are from a university econometrics course." Models grade noticeably better when they know the subject and level.
+- **Set the strictness**: "Exact terms matter here: count a missing technical term as a missing key point", or the opposite, "Only the main idea matters".
+- **Say what must be there**: "For formula cards, the formula itself must be stated", "Dates must be within 5 years".
+- **Languages**: "The cards are in English but I answer in Ukrainian; that's fine. Write feedback in Ukrainian."
+- **Vocabulary decks**: "The question is a word; the answer is correct if it gives any one accepted translation."
+
+### Memory and performance
+The AI runs on the same computer as the game, and on most machines (all Apple Silicon Macs) it uses the same memory and graphics chip, so a model that's too big makes the game stutter. **AI Grading... → Memory & performance...** is where you decide who gets what.
+
+**Profiles** set everything in one click (they're worked out from your computer's RAM and Minecraft's memory setting):
+
+| Profile | AI memory budget | Model stays loaded | Best for |
+|---|---|---|---|
+| **Recommended** | what's left after Minecraft and the system (at most 45% of your RAM) | 10 minutes after a card | most people |
+| **Minecraft first** | small (at most 25% of your RAM) | 1 minute, so its memory is free while you play | smoothest game; the model is loaded again while you type the next answer |
+| **AI speed first** | large (up to 65% of your RAM) | 1 hour | fastest grading, with plenty of RAM |
+| **Custom** | your own numbers | | appears when you move a slider |
+
+The sliders:
+- **AI memory budget** (in GB, with the percentage of your RAM). Ollama has no "use at most N GB" switch: the AI's memory is decided by *which model* is loaded. So the budget is the yardstick. Every model list shows roughly how much RAM each model needs, green if it fits the budget and yellow if it doesn't, and this screen warns you when the chosen model is too big and offers a **Switch to ...** button for the largest installed model that fits.
+- **Keep loaded** (0-120 minutes after grading): the real lever for how long the AI holds its memory. Short frees memory while you play, at the cost of loading the model again (a few seconds, while you type). Long keeps it always ready.
+- **CPU threads**: only matters when the model runs on the CPU; fewer threads leave more of the processor for the game.
+
+**The live memory bar** shows your whole computer, refreshed every two seconds:
+- green: Minecraft (solid = in use now, faint = what it may still grow to),
+- the purple outline: your AI budget, with the solid purple inside it = the model that's loaded right now (red where it spills over the budget), and when it will be unloaded,
+- the rest: the system and your other apps.
+
+Open it while a card is being graded and you'll see the model appear in the bar; with a short "keep loaded" you'll see it leave again.
+
+What the mod does on its own to keep grading quick:
+- **While you type**, the model is loaded and reads its instructions, the question and the card's answer. When you press Enter it only has to read your answer, so it starts writing the grade almost at once, and the heavy reading happens while the card is still on screen.
+- Reasoning models (qwen3, deepseek-r1...) are told to skip their "thinking out loud" phase.
+- The reply is kept short and capped, and the AI's working memory (context) is fixed at a modest size.
+
+If the game still stutters: a smaller model (`qwen2.5:3b`, `llama3.2:3b`) helps the most, then the *Minecraft first* profile, then lowering Minecraft's render distance. With [deck presets](#deck-presets) you can keep a big model only for the decks that need it.
+
+## Deck presets
+Flashcards config → **Deck Presets...** Pick a deck on the left and give it its own:
+- **AI model**: opens a searchable list of your installed models, with the RAM each one needs. E.g. a bigger model for a hard subject, a small fast one for vocabulary.
+- **AI deck notes**: a few sentences about the deck for the grading AI, with helpers that write them for you, see [Deck notes](#deck-notes). Replacing the whole prompt for a deck is in there too, as an advanced option.
+- **Rewards**: its own rewards and penalties, from the same presets as the main ones, or *Same as main*.
+- **Time between cards**: click to switch from *Default* to *Own*, then type the minutes and seconds. E.g. every 2 minutes for a deck you're cramming, every 10 for one you only maintain.
+
+A blue dot marks decks that have a preset. How presets apply:
+- The preset of the deck the **card** is in is used, so when you study a parent deck, each subdeck's cards follow that subdeck's preset.
+- Anything a deck leaves on *Default* comes from its parent deck, then from the main settings. Each part is looked up separately: a subdeck can set only its own model and still use its parent's notes.
+- **Time between cards** needs one extra rule, because the countdown runs before the next card is known: after you answer a card, the wait until the next question is the time of *that card's* deck. When no card has been shown yet (you just joined a world, or changed settings), it's the time of the deck picked in **Anki Sync...**. The HUD countdown and its progress bar follow whichever time is in use.
+- *Clear this deck's preset* puts everything back to Default.
+
+Score cut-offs, the second chance and the "keep playing" settings are shared by all decks.
 
 ## Timer and study HUD
 A small panel shows:
@@ -109,13 +204,24 @@ A small panel shows:
 
 **Moving and resizing:** Flashcards config → **HUD Layout...** Drag the study panel or the AI thinking indicator anywhere; scroll over one (or press `+` / `-`) to resize it from 50% to 300%; arrow keys nudge by a pixel (Shift = 10). Panels snap to the screen's centre lines and can't leave the screen, and they keep their relative position if you resize the window. **Reset** puts both back.
 
+### Card keys
+Flashcards config → **General... → Card Keys...** Click a key button and press the new key (Esc cancels).
+
+| Action | Default |
+|---|---|
+| Show answer / pick the suggested grade | Space (Enter always works too) |
+| 1st to 4th grade button (Again, Hard, Good, Easy) | 1, 2, 3, 4 (the number pad always works too) |
+| Keep playing while the AI grades | Space (Esc always works too) |
+
+**Stray key protection.** A card can pop up while you're running and jumping, with Space and W held down. So when a card appears (also when it comes back after AI grading), the keyboard is ignored for a moment (default 1 second, adjustable from 0 to 5) *and* until you've let go of the movement, jump and card keys you were holding. A small "keys unlock in ..." note shows while that's happening; the mouse always works. After each step on a card (e.g. showing the answer) there's a much shorter pause, so one long key press can't count twice.
+
 Other settings are in Flashcards config → **General...**:
 - **Question timer: Real time / Game time**
   - *Real time* (default) counts real-world minutes, even while the game is paused or a menu is open.
   - *Game time* counts only while the world is running, so it stops while the game is paused and follows `/tick rate`. 1 minute = 1200 game ticks (a full Minecraft day is 20 minutes). In multiplayer the game never pauses, so this behaves almost like real time.
 - **Timer & stats HUD: ON/OFF**. The HUD is hidden with F1 and while the F3 debug screen is open.
 
-The interval itself is set on the main config screen: "Prompt a question every [N] min [N] sec" (at least 1 second in total).
+The interval itself is set on the main config screen: "Prompt a question every [N] min [N] sec" (at least 1 second in total). A deck can have its own time, see [Deck presets](#deck-presets).
 
 ## Rewards and penalties
 Optional. Flashcards config → **Rewards & Penalties...** lets commands run when you answer right (in Anki mode: Hard, Good or Easy) or wrong (Again).

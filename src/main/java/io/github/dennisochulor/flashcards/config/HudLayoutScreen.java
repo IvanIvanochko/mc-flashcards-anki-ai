@@ -111,6 +111,7 @@ class HudLayoutScreen extends Screen {
 
     @Override
     protected void init() {
+        doneButton.setTooltip(Tooltip.create(Component.literal("Save the layout and go back")));
         // bottom centre, out of the way of the default panel positions
         resetButton.setPosition(width / 2 - 74, height - 26);
         doneButton.setPosition(width / 2 + 4, height - 26);

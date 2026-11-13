@@ -5,7 +5,7 @@ import io.github.dennisochulor.flashcards.FileManager;
 import io.github.dennisochulor.flashcards.Flashcards;
 import io.github.dennisochulor.flashcards.ModStats;
 import io.github.dennisochulor.flashcards.anki.StudyStats;
-import io.github.dennisochulor.flashcards.config.ModConfig;
+import io.github.dennisochulor.flashcards.config.DeckSettings;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
@@ -14,6 +14,8 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.CommonColors;
+
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 import java.util.UUID;
@@ -30,18 +32,26 @@ public final class AnswerOutcome {
         StudyStats.recordAnswer(correct);
     }
 
-    /** Runs the reward (right answer) or penalty (wrong answer) commands from the Rewards &amp; Penalties screen. */
+    /** Runs the main reward (right answer) or penalty (wrong answer) commands. For the mod's own question lists. */
     public static void runCommands(boolean correct) {
+        runCommands(correct, null);
+    }
+
+    /**
+     * Runs the reward (right answer) or penalty (wrong answer) commands that apply to this deck:
+     * the deck's own if its preset has them, otherwise the main ones.
+     */
+    public static void runCommands(boolean correct, @Nullable String deck) {
         Minecraft minecraft = Minecraft.getInstance();
         LocalPlayer player = minecraft.player;
         ClientPacketListener connection = minecraft.getConnection();
         if (player == null || connection == null) return;
 
-        ModConfig config = FileManager.getConfig();
-        List<String> commands = correct ? config.correctAnswerCommands() : config.wrongAnswerCommands();
+        DeckSettings settings = DeckSettings.forDeck(FileManager.getConfig(), deck);
+        List<String> commands = correct ? settings.correctCommands() : settings.wrongCommands();
         if (commands.isEmpty()) return;
 
-        List<String> toRun = switch (config.commandSelectionStrategy()) {
+        List<String> toRun = switch (settings.strategy()) {
             case EXECUTE_ALL -> commands;
             case RANDOMISE_ONE -> List.of(commands.get(player.getRandom().nextInt(commands.size())));
             case OFF -> List.of();

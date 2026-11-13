@@ -42,11 +42,24 @@ public final class AnkiHtml {
         return m.find() ? answerHtml.substring(m.end()) : answerHtml;
     }
 
+    /** Text for the screen: formulas become Unicode, bold/italic/underline become § formatting codes. */
     public static Rendered render(String html) {
+        return render(html, false);
+    }
+
+    /**
+     * Text for the grading AI: plain text with formulas left as LaTeX source (which language models read far
+     * more reliably than a Unicode approximation like "βˆ₁"), and no formatting codes.
+     */
+    public static String plainForAi(String html) {
+        return render(html, true).text();
+    }
+
+    private static Rendered render(String html, boolean forAi) {
         String s = REMOVE_BLOCKS.matcher(html).replaceAll("");
         s = AV_TAGS.matcher(s).replaceAll("");
-        s = replaceMath(s, DISPLAY_MATH, true);
-        s = replaceMath(s, INLINE_MATH, false);
+        s = replaceMath(s, DISPLAY_MATH, true, forAi);
+        s = replaceMath(s, INLINE_MATH, false, forAi);
 
         List<String> images = new ArrayList<>();
         StringBuilder out = new StringBuilder();
@@ -79,7 +92,7 @@ public final class AnkiHtml {
                 }
                 default -> {}
             }
-            if (before != bold * 100 + italic * 10 + underline) {
+            if (!forAi && before != bold * 100 + italic * 10 + underline) {
                 out.append("§r");
                 if (bold > 0) out.append("§l");
                 if (italic > 0) out.append("§o");
@@ -97,14 +110,17 @@ public final class AnkiHtml {
     }
 
     /** Converts MathJax/LaTeX spans to Unicode text, emitted as escaped HTML so the normal tag handling (bold, line breaks) applies. */
-    private static String replaceMath(String html, Pattern pattern, boolean display) {
+    private static String replaceMath(String html, Pattern pattern, boolean display, boolean forAi) {
         Matcher m = pattern.matcher(html);
         StringBuilder sb = new StringBuilder();
         while (m.find()) {
             String latex = m.group(1) != null ? m.group(1) : m.group(m.groupCount());
             latex = decodeEntities(ANY_TAG.matcher(MATH_BREAK.matcher(latex).replaceAll(" ")).replaceAll(""));
             String converted;
-            try {
+            if (forAi) {
+                converted = (display ? "\\[ " : "\\( ") + latex.strip() + (display ? " \\]" : " \\)");
+            }
+            else try {
                 converted = LatexText.convert(latex);
             }
             catch (RuntimeException e) { // never lose the card because of odd LaTeX

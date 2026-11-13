@@ -1,5 +1,6 @@
 package io.github.dennisochulor.flashcards.questions;
 
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.MultiLineEditBox;
@@ -20,6 +21,7 @@ public class AutoValidationQuestionScreen extends QuestionScreen {
 
     @Override
     public void init() {
+        submitButton.setTooltip(Tooltip.create(Component.literal("Check your answer")));
         super.init();
 
         // have to recreate editbox everytime since its internal textfield cannot resize its width

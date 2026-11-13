@@ -1,5 +1,6 @@
 package io.github.dennisochulor.flashcards.questions;
 
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.network.chat.Component;
@@ -37,6 +38,9 @@ public class ManualValidationQuestionScreen extends QuestionScreen {
 
     @Override
     public void init() {
+        showAnswerButton.setTooltip(Tooltip.create(Component.literal("Reveal the answer, then say whether you were right")));
+        correctButton.setTooltip(Tooltip.create(Component.literal("I got it right (counts as a correct answer)")));
+        wrongButton.setTooltip(Tooltip.create(Component.literal("I got it wrong (counts as a wrong answer)")));
         super.init();
         correctAnswerText.setMaxHeigth((int) (height * 0.25));
         correctAnswerText.setPosition(width/2 - correctAnswerText.getWidth()/2, (int) (height * 0.6));

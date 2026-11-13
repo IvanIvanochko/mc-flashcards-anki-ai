@@ -6,6 +6,7 @@ import io.github.dennisochulor.flashcards.questions.Question;
 import io.github.dennisochulor.flashcards.questions.QuestionScheduler;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -90,6 +91,13 @@ public class EditScreen extends Screen {
 
     @Override
     protected void init() {
+        categoryRenameButton.setTooltip(Tooltip.create(Component.literal("Rename the selected category")));
+        categoryAddButton.setTooltip(Tooltip.create(Component.literal("Create a new category of questions")));
+        categoryDeleteButton.setTooltip(Tooltip.create(Component.literal("Delete the selected category and all its questions")));
+        questionEditButton.setTooltip(Tooltip.create(Component.literal("Change the selected question")));
+        questionDeleteButton.setTooltip(Tooltip.create(Component.literal("Delete the selected question")));
+        questionAddButton.setTooltip(Tooltip.create(Component.literal("Add a question to the selected category")));
+        applyButton.setTooltip(Tooltip.create(Component.literal("Save all changes to your questions and go back")));
         categoryList.updateSizeAndPosition(85, 100, width/4 - 100, 20);
         questionList.updateSizeAndPosition(width/2, height - 75, width/2 - width/4, 20);
 

@@ -8,7 +8,10 @@ import io.github.dennisochulor.flashcards.ai.GradingPrompt;
 import io.github.dennisochulor.flashcards.ai.Ollama;
 import io.github.dennisochulor.flashcards.anki.AnkiCard;
 import io.github.dennisochulor.flashcards.anki.AnkiSession;
+import io.github.dennisochulor.flashcards.config.DeckSettings;
 import io.github.dennisochulor.flashcards.config.ModConfig;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -17,6 +20,7 @@ import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -32,6 +36,8 @@ import java.util.Locale;
  * normal review. Again counts as a wrong answer for the reward/penalty commands, the other buttons count as correct.
  * <p>
  * Classic mode, like Anki: Space/Enter shows the answer, then 1-4 (or Space/Enter = Good) grades it.
+ * The keys can be changed (Card Keys screen), and the keyboard is ignored for a moment when a card appears and until
+ * keys that were already held are released, so mashing Space while running and jumping can't skip a card unseen.
  * <p>
  * AI grading mode: the player types an answer and a local AI grades it by meaning. The score unlocks the buttons
  * (Again always; Hard/Good/Easy from the configured cut-offs). "Show Answer" means "I don't know": only Again is offered.
@@ -74,8 +80,10 @@ public class AnkiQuestionScreen extends Screen {
     }
 
     private final AnkiCard card;
-    private final boolean aiMode = AiGrader.isEnabled();
-    private final ModConfig.AiGrading ai = FileManager.getConfig().aiGrading();
+    /** The main settings with this card's deck preset applied (model, prompt). */
+    private final DeckSettings settings;
+    private final ModConfig.AiGrading ai;
+    private final boolean aiMode;
     private final CardView cardView = new CardView(Minecraft.getInstance().font);
     private final StringWidget header;
     private final MultiLineEditBox answerBox;
@@ -102,12 +110,22 @@ public class AnkiQuestionScreen extends Screen {
     private long gradingStartedMillis = 0;
     private int thinkingY = 0;
     private boolean quitShown = false;
+    private final ModConfig.CardKeys keys = FileManager.getConfig().cardKeys();
+    /** The keyboard is ignored while this is true, see {@link #inputReady}. */
+    private boolean inputLocked = true;
+    private long inputLockedAtMillis = System.currentTimeMillis();
+    private long inputGraceMillis = keys.graceMillis();
     private boolean scrollAfterInit = false;
     private long backgroundSinceMillis = 0;
 
     public AnkiQuestionScreen(AnkiCard card) {
         super(Component.literal("Anki card"));
         this.card = card;
+        ModConfig config = FileManager.getConfig();
+        this.settings = DeckSettings.forDeck(config, card.deckName());
+        this.ai = settings.ai();
+        // the AI only sees text: a card whose answer is just an image can't be graded by it
+        this.aiMode = AiGrader.isEnabled(config, ai) && !card.answerForAi().isBlank();
         Font font = Minecraft.getInstance().font;
 
         String deck = card.deckName().isBlank() ? "Anki" : card.deckName();
@@ -120,7 +138,7 @@ public class AnkiQuestionScreen extends Screen {
         answerBox.setValueListener(_ -> updateCheckButton());
 
         showAnswerButton = Button.builder(Component.literal("Show Answer"), _ -> reveal())
-                .tooltip(Tooltip.create(Component.literal(aiMode ? "I don't know: see the answer, it's graded as Again" : "Space / Enter")))
+                .tooltip(Tooltip.create(Component.literal(aiMode ? "I don't know: see the answer, it's graded as Again" : keyName(keys.confirm()) + " / Enter")))
                 .build();
         checkButton = Button.builder(Component.literal("Check answer"), _ -> checkAnswer())
                 .tooltip(Tooltip.create(Component.literal("Let the AI grade your answer (Enter)")))
@@ -131,7 +149,7 @@ public class AnkiQuestionScreen extends Screen {
                 .build();
 
         quitButton = Button.builder(Component.literal("Keep playing"), _ -> quitToGame())
-                .tooltip(Tooltip.create(Component.literal("Play while the AI finishes; this card comes back when it's graded. (Space / Esc)")))
+                .tooltip(Tooltip.create(Component.literal("Play while the AI finishes; this card comes back when it's graded. (" + keyName(keys.keepPlaying()) + " / Esc)")))
                 .size(90, 20).build();
 
         List<Integer> buttons = card.buttons().isEmpty() ? List.of(1, 2, 3, 4) : card.buttons();
@@ -149,7 +167,8 @@ public class AnkiQuestionScreen extends Screen {
         updateCheckButton();
         updateGradeButtons();
 
-        if (aiMode) AiGrader.preload(); // load the model while the player types
+        // while the player types: load the model and let it read the instructions and this card
+        if (aiMode) AiGrader.preload(ai, settings.systemPrompt(), card.questionForAi(), card.answerForAi());
     }
 
     /** Anki shows 4 buttons in the v3 scheduler; older schedulers can offer only Again/Good(/Easy) for learning cards. */
@@ -215,10 +234,66 @@ public class AnkiQuestionScreen extends Screen {
             String name = gradeNames.get(i);
             StringBuilder tip = new StringBuilder();
             if (!unlocked && phase == Phase.GRADED) tip.append("Locked: needs a score of ").append(format(minimumScore(name))).append("\n\n");
-            tip.append(GradingPrompt.DEFINITIONS[nameToEase4(name) - 1]).append("\n\nKey: ").append(i + 1);
+            tip.append(GradingPrompt.DEFINITIONS[nameToEase4(name) - 1]).append("\n\nKey: ").append(keyName(gradeKey(i)));
             if (!interval.isEmpty()) tip.append(" · next review in ").append(interval);
             button.setTooltip(Tooltip.create(Component.literal(tip.toString())));
         }
+    }
+
+    private static String keyName(int keyCode) {
+        return InputConstants.Type.KEYBOARD.getOrCreate(keyCode).getDisplayName().getString();
+    }
+
+    /** The key for the grade button at this position (1st to 4th), like Anki's 1-4. */
+    private int gradeKey(int index) {
+        return switch (index) { case 0 -> keys.again(); case 1 -> keys.hard(); case 2 -> keys.good(); default -> keys.easy(); };
+    }
+
+    // ---------------------------------------------------------------- stray key protection
+
+    /**
+     * Ignore the keyboard for a while. Called when a card appears (full grace period: the player may be mid-jump,
+     * hammering Space) and when the card changes state (short: a key held from the last press mustn't count twice).
+     */
+    private void lockInput(boolean cardJustAppeared) {
+        inputLocked = true;
+        inputLockedAtMillis = System.currentTimeMillis();
+        inputGraceMillis = cardJustAppeared ? keys.graceMillis() : Math.min(keys.graceMillis(), 300);
+    }
+
+    private long inputLockRemainingMillis() {
+        return inputLocked ? Math.max(0, inputGraceMillis - (System.currentTimeMillis() - inputLockedAtMillis)) : 0;
+    }
+
+    /**
+     * @return whether key presses count yet: the grace period is over AND none of the keys the player was likely
+     * holding (movement, jump, the card keys) is still down. The second part matters because a held key keeps
+     * sending presses: without it, W held from walking would type "wwww" and Space would answer the card.
+     */
+    private boolean inputReady() {
+        if (!inputLocked) return true;
+        if (inputLockRemainingMillis() > 0 || anyWatchedKeyDown()) return false;
+        inputLocked = false;
+        return true;
+    }
+
+    private boolean anyWatchedKeyDown() {
+        int[] cardKeys = {keys.confirm(), keys.again(), keys.hard(), keys.good(), keys.easy(), keys.keepPlaying(),
+                InputConstants.KEY_RETURN, InputConstants.KEY_NUMPADENTER};
+        for (int key : cardKeys) if (InputConstants.isKeyDown(key)) return true;
+        var options = Minecraft.getInstance().options;
+        KeyMapping[] movement = {options.keyUp, options.keyDown, options.keyLeft, options.keyRight, options.keyJump, options.keyShift, options.keySprint};
+        for (KeyMapping mapping : movement) {
+            InputConstants.Key bound = KeyMappingHelper.getBoundKeyOf(mapping);
+            if (bound.getType() == InputConstants.Type.KEYBOARD && InputConstants.isKeyDown(bound.getValue())) return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean charTyped(CharacterEvent event) {
+        if (!inputReady()) return true; // swallow letters from keys held since before the card appeared
+        return super.charTyped(event);
     }
 
     private static String format(double score) {
@@ -345,6 +420,7 @@ public class AnkiQuestionScreen extends Screen {
 
     @Override
     public void init() {
+        retryButton.setTooltip(Tooltip.create(Component.literal("Ask the AI to grade your answer again")));
         // blocks depend on the screen height (image size), so rebuild them on resize
         cardView.setBlocks(blocksForPhase());
         cardView.setAccent(accentForPhase());
@@ -446,6 +522,13 @@ public class AnkiQuestionScreen extends Screen {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
         if (phase == Phase.GRADING) extractThinking(graphics);
 
+        long lockLeft = inputLockRemainingMillis();
+        if (lockLeft > 150) { // tell the player why the keyboard isn't responding yet (the mouse always works)
+            String hint = "keys unlock in " + String.format(Locale.ROOT, "%.1f", lockLeft / 1000.0) + "s";
+            graphics.text(Minecraft.getInstance().font, hint, cardView.getRight() - Minecraft.getInstance().font.width(hint),
+                    (HEADER_HEIGHT - 9) / 2, 0xFF777C88, false);
+        }
+
         // a strip in each grade button's colour: bright if you can press it, faint if it's locked
         if (phase == Phase.REVEALED || phase == Phase.GRADED || phase == Phase.GAVE_UP) {
             for (int i = 0; i < gradeButtons.size(); i++) {
@@ -519,6 +602,7 @@ public class AnkiQuestionScreen extends Screen {
         if (minecraft.player == null || minecraft.gui.screen() != null || QuestionScheduler.wasPlayerHurtRecently()) return;
         background = null;
         screen.scrollAfterInit = true;
+        screen.lockInput(true); // the player is in the middle of playing: same protection as a new card
         minecraft.gui.setScreen(screen);
     }
 
@@ -533,6 +617,7 @@ public class AnkiQuestionScreen extends Screen {
         phase = newPhase;
         updateGradeButtons();
         if (background == this) return; // not on screen: tickBackground reopens it, and init lays it out then
+        lockInput(false);
         setFocused(null);
         rebuildWidgets();
         scrollForPhase();
@@ -564,13 +649,15 @@ public class AnkiQuestionScreen extends Screen {
         quitShown = false;
         setPhase(Phase.GRADING);
         if (ai.autoKeepPlaying()) quitToGame(); // play while the AI thinks, without asking
-        AiGrader.grade(plain(card.question()), plain(card.answer()), typedAnswer, grade -> {
+        AiGrader.grade(ai, settings.systemPrompt(), card.questionForAi(), card.answerForAi(), typedAnswer, grade -> {
             if (phase != Phase.GRADING) return;
             if (attempt == 1 && grade.ease() == AGAIN && isVagueButOnTrack(grade)) {
                 // One second chance: say what to be specific about, keep the answer so it can be extended
                 attempt = 2;
                 firstAnswer = typedAnswer;
                 secondChanceHint = grade.vagueHint().isBlank() ? "Be more specific about the key ideas the question asks for." : grade.vagueHint();
+                // the model may be set to unload soon after grading: keep it ready while the second answer is typed
+                AiGrader.preload(ai, settings.systemPrompt(), card.questionForAi(), card.answerForAi());
                 setPhase(Phase.SECOND_CHANCE);
                 return;
             }
@@ -599,11 +686,6 @@ public class AnkiQuestionScreen extends Screen {
         return somethingRight;
     }
 
-    /** Card text without Minecraft formatting codes, for the AI. */
-    private static String plain(String text) {
-        return text.replaceAll("§.", "");
-    }
-
     private void grade(int ease) {
         int index = gradeEases.indexOf(ease);
         if (answered || index < 0 || !isUnlocked(index)) return;
@@ -612,9 +694,9 @@ public class AnkiQuestionScreen extends Screen {
 
         AnkiSession.answer(card, ease);
         AnswerOutcome.playSoundAndRecordStats(correct);
-        QuestionScheduler.schedule();
+        QuestionScheduler.schedule(card.deckName()); // this deck's own time until the next question, if it has one
         this.onClose();
-        AnswerOutcome.runCommands(correct);
+        AnswerOutcome.runCommands(correct, card.deckName());
     }
 
     @Override
@@ -631,12 +713,15 @@ public class AnkiQuestionScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent event) {
+        if (!inputReady()) return true; // a card just appeared (or changed): stray keys don't count yet
+
         int key = event.key();
         boolean typing = isTyping();
+        // Enter always confirms; the configurable key (Space by default) too, except while typing, where it's a letter
         boolean confirm = key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER
-                || (!typing && key == InputConstants.KEY_SPACE);
+                || (!typing && key == keys.confirm());
 
-        if (phase == Phase.GRADING && quitShown && (key == InputConstants.KEY_SPACE || key == InputConstants.KEY_ESCAPE)) {
+        if (phase == Phase.GRADING && quitShown && (key == keys.keepPlaying() || key == InputConstants.KEY_ESCAPE)) {
             quitToGame();
             return true;
         }
@@ -679,13 +764,15 @@ public class AnkiQuestionScreen extends Screen {
                 }
             }
             case REVEALED, GAVE_UP, GRADED -> {
-                int index = switch (key) {
-                    case InputConstants.KEY_1, InputConstants.KEY_NUMPAD1 -> 0;
-                    case InputConstants.KEY_2, InputConstants.KEY_NUMPAD2 -> 1;
-                    case InputConstants.KEY_3, InputConstants.KEY_NUMPAD3 -> 2;
-                    case InputConstants.KEY_4, InputConstants.KEY_NUMPAD4 -> 3;
-                    default -> -1;
-                };
+                int index = -1;
+                for (int i = 0; i < 4; i++) if (key == gradeKey(i)) index = i;
+                switch (key) { // the number pad always works too
+                    case InputConstants.KEY_NUMPAD1 -> index = 0;
+                    case InputConstants.KEY_NUMPAD2 -> index = 1;
+                    case InputConstants.KEY_NUMPAD3 -> index = 2;
+                    case InputConstants.KEY_NUMPAD4 -> index = 3;
+                    default -> {}
+                }
                 if (confirm && !sliderFocused) index = suggestedIndex();
                 if (index >= 0 && index < gradeEases.size()) {
                     grade(gradeEases.get(index)); // ignored if that button is locked

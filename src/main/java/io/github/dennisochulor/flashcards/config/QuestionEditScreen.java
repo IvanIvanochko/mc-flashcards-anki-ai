@@ -78,6 +78,7 @@ class QuestionEditScreen extends Screen {
 
     @Override
     public void init() {
+        applyButton.setTooltip(Tooltip.create(Component.literal("Keep this question and go back. It is saved to disk when you press Apply Changes.")));
         // have to recreate editbox everytime since its internal textfield cannot resize its width
         int partWidth = (int) (width * 0.45);
         int partHeight = (int) (height * 0.25);

@@ -1,5 +1,6 @@
 package io.github.dennisochulor.flashcards.questions;
 
+import net.minecraft.client.gui.components.Tooltip;
 import io.github.dennisochulor.flashcards.FileManager;
 import io.github.dennisochulor.flashcards.ImageUtils;
 import net.minecraft.client.Minecraft;
@@ -54,6 +55,7 @@ class AutoValidationResultScreen extends Screen {
 
     @Override
     public void init() {
+        doneButton.setTooltip(Tooltip.create(Component.literal("Continue playing")));
         int partHeight = (int) (0.3 * this.height);
 
         LinearLayout titleLayout = LinearLayout.horizontal();

@@ -47,17 +47,23 @@ class GeneralConfigScreen extends Screen {
             .tooltip(Tooltip.create(Component.literal("Drag the study panel and the AI thinking indicator anywhere, and resize them.")))
             .size(200, 20).build();
 
+    private final Button cardKeysButton = Button.builder(Component.literal("Card Keys..."), _ -> Minecraft.getInstance().gui.setScreen(new CardKeysScreen()))
+            .tooltip(Tooltip.create(Component.literal("Change the keys used on a card, and how long stray key presses are ignored when a card pops up.")))
+            .size(200, 20).build();
+
     private final Button doneButton = Button.builder(Component.literal("Done"), _ -> this.onClose())
             .size(100, 20).build();
 
     @Override
     protected void init() {
+        doneButton.setTooltip(Tooltip.create(Component.literal("Save these settings and go back")));
         LinearLayout options = LinearLayout.vertical().spacing(10);
         options.defaultCellSetting().alignHorizontallyCenter();
         options.addChild(validationToggleButton);
         options.addChild(timerModeButton);
         options.addChild(hudButton);
         options.addChild(hudLayoutButton);
+        options.addChild(cardKeysButton);
 
         HeaderAndFooterLayout root = new HeaderAndFooterLayout(this, 25, 40);
         root.addToHeader(titleText);

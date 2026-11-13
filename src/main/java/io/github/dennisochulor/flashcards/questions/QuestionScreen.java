@@ -80,6 +80,7 @@ public class QuestionScreen extends Screen {
                 root.addToContents(imageWidget);
 
                 Button doneButton = Button.builder(Component.literal("Done"), _ -> this.onClose())
+                        .tooltip(Tooltip.create(Component.literal("Back to the question")))
                         .size(75, 20).build();
                 root.addToFooter(doneButton);
 

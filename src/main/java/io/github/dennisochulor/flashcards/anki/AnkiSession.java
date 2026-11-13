@@ -3,6 +3,7 @@ package io.github.dennisochulor.flashcards.anki;
 import io.github.dennisochulor.flashcards.FileManager;
 import io.github.dennisochulor.flashcards.Flashcards;
 import io.github.dennisochulor.flashcards.ImageUtils;
+import io.github.dennisochulor.flashcards.ai.DeckNotesWriter;
 import io.github.dennisochulor.flashcards.config.ModConfig;
 import io.github.dennisochulor.flashcards.questions.AnkiQuestionScreen;
 import io.github.dennisochulor.flashcards.questions.QuestionScheduler;
@@ -135,7 +136,8 @@ public final class AnkiSession {
 
         String questionText = question.text().isBlank() && questionImage == null ? "(empty card front)" : question.text();
         return new AnkiCard(current.cardId(), current.deckName(), questionText, questionImage, answer.text(), answerImage,
-                current.buttons(), current.nextReviews());
+                current.buttons(), current.nextReviews(),
+                AnkiHtml.plainForAi(current.questionHtml()), AnkiHtml.plainForAi(AnkiHtml.answerOnly(current.answerHtml())));
     }
 
     /** Copies the first displayable image from Anki's media folder into the mod's media folder. */
@@ -265,6 +267,29 @@ public final class AnkiSession {
             }
             catch (RuntimeException e) { // e.g. a malformed URL
                 Minecraft.getInstance().execute(() -> onError.accept("Invalid AnkiConnect address: " + e.getMessage()));
+            }
+        });
+    }
+
+    /**
+     * Loads a few sample cards of a deck as plain text, for writing deck notes; exactly one callback runs, on the client thread.
+     */
+    public static void loadSamples(String deck, int count, Consumer<List<DeckNotesWriter.Sample>> onSuccess, Consumer<String> onError) {
+        EXECUTOR.execute(() -> {
+            try {
+                List<DeckNotesWriter.Sample> samples = new java.util.ArrayList<>();
+                for (AnkiConnect.CardSides card : client().sampleCards(deck, count)) {
+                    samples.add(new DeckNotesWriter.Sample(AnkiHtml.plainForAi(card.questionHtml()),
+                            AnkiHtml.plainForAi(AnkiHtml.answerOnly(card.answerHtml()))));
+                }
+                Minecraft.getInstance().execute(() -> onSuccess.accept(samples));
+            }
+            catch (AnkiConnect.AnkiException e) {
+                Minecraft.getInstance().execute(() -> onError.accept(e.getMessage()));
+            }
+            catch (RuntimeException e) {
+                Flashcards.LOGGER.warn("Couldn't load sample cards for {}", deck, e);
+                Minecraft.getInstance().execute(() -> onError.accept("Couldn't read cards from Anki."));
             }
         });
     }

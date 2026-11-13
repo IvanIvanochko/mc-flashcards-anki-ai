@@ -110,6 +110,32 @@ public final class AnkiConnect {
         return null;
     }
 
+    /** One card's rendered sides, as HTML. */
+    public record CardSides(String questionHtml, String answerHtml) {}
+
+    /**
+     * A few cards from a deck (and its subdecks), spread evenly over the deck so they represent it, not just its start.
+     * Reading them doesn't touch the review queue or the schedule.
+     */
+    public List<CardSides> sampleCards(String deck, int count) throws AnkiException {
+        String query = "deck:\"" + deck.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        List<Long> ids = new ArrayList<>();
+        invoke("findCards", Map.of("query", query), Duration.ofSeconds(10)).getAsJsonArray().forEach(e -> ids.add(e.getAsLong()));
+        if (ids.isEmpty()) return List.of();
+        ids.sort(null); // card ids are creation times: oldest first
+
+        List<Long> picked = new ArrayList<>();
+        int take = Math.min(count, ids.size());
+        for (int i = 0; i < take; i++) picked.add(ids.get((int) ((long) i * ids.size() / take)));
+
+        List<CardSides> cards = new ArrayList<>();
+        invoke("cardsInfo", Map.of("cards", picked), Duration.ofSeconds(15)).getAsJsonArray().forEach(e -> {
+            JsonObject o = e.getAsJsonObject();
+            if (o.has("question") && o.has("answer")) cards.add(new CardSides(o.get("question").getAsString(), o.get("answer").getAsString()));
+        });
+        return cards;
+    }
+
     public boolean guiShowAnswer() throws AnkiException {
         return invoke("guiShowAnswer", null, Duration.ofSeconds(10)).getAsBoolean();
     }

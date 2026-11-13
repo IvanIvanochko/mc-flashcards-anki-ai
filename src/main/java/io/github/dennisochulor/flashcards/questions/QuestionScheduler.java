@@ -2,9 +2,12 @@ package io.github.dennisochulor.flashcards.questions;
 
 import io.github.dennisochulor.flashcards.FileManager;
 import io.github.dennisochulor.flashcards.anki.AnkiSession;
+import io.github.dennisochulor.flashcards.config.DeckSettings;
 import io.github.dennisochulor.flashcards.config.ModConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,6 +47,9 @@ public class QuestionScheduler {
     private static long deadlineNanos;   // REAL_TIME
     private static long remainingTicks;  // GAME_TIME
     private static long lastGameTime = Long.MIN_VALUE;
+    /** The deck whose time the current countdown uses (null = the main interval), and that time. */
+    private static @Nullable String intervalDeck = null;
+    private static long intervalSeconds = 0;
 
     public static void reload() {
         config = FileManager.getConfig();
@@ -54,17 +60,38 @@ public class QuestionScheduler {
         Collections.shuffle(questions);
     }
 
-    /** (Re)starts the countdown from the full interval. */
+    /**
+     * (Re)starts the countdown when there's no card to go by (joining a world, a settings change, nothing left to study):
+     * the time comes from the deck picked in Anki Sync, or the main interval outside Anki mode.
+     */
     public static void schedule() {
+        ModConfig latest = FileManager.getConfig();
+        schedule(latest.ankiMode() && !latest.ankiDeck().isBlank() ? latest.ankiDeck() : null);
+    }
+
+    /**
+     * (Re)starts the countdown after a card: the time until the next question is the one set for that card's deck
+     * (Deck Presets), or the main interval if the deck and its parents don't set one.
+     * @param deck the full Anki deck name of the card just answered, or null for the main interval
+     */
+    public static void schedule(@Nullable String deck) {
         ClientLevel level = Minecraft.getInstance().level;
         if (!config.intervalToggle() || level == null) {
             state = State.OFF;
             return;
         }
+        intervalDeck = deck;
+        intervalSeconds = DeckSettings.forDeck(FileManager.getConfig(), deck).intervalSeconds();
         state = State.COUNTING;
-        deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(config.intervalTotalSeconds());
-        remainingTicks = config.intervalTotalSeconds() * TICKS_PER_SECOND;
+        deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(intervalSeconds);
+        remainingTicks = intervalSeconds * TICKS_PER_SECOND;
         lastGameTime = level.getGameTime();
+    }
+
+    /** Call when deck presets were edited: a running countdown restarts if the time that applies to it changed. */
+    public static void deckPresetsChanged() {
+        if (state != State.COUNTING) return;
+        if (DeckSettings.forDeck(FileManager.getConfig(), intervalDeck).intervalSeconds() != intervalSeconds) schedule(intervalDeck);
     }
 
     public static void stop() {
@@ -84,7 +111,10 @@ public class QuestionScheduler {
         }
         boolean timingChanged = old.intervalTotalSeconds() != newConfig.intervalTotalSeconds() || old.intervalToggle() != newConfig.intervalToggle()
                 || old.timerMode() != newConfig.timerMode();
-        if (timingChanged || state == State.OFF) schedule(); // otherwise keep the running countdown
+        boolean deckChanged = !old.ankiDeck().equals(newConfig.ankiDeck()) || !old.ankiMode().equals(newConfig.ankiMode());
+        if (state == State.OFF || deckChanged) schedule();      // start from the deck picked in Anki Sync
+        else if (timingChanged) schedule(intervalDeck);
+        else deckPresetsChanged();                              // otherwise keep the running countdown
     }
 
     public static State state() {
@@ -97,7 +127,7 @@ public class QuestionScheduler {
 
     /** @return the full interval between questions, in milliseconds */
     public static long totalMillis() {
-        return config.intervalTotalSeconds() * 1000L;
+        return intervalSeconds * 1000L;
     }
 
     /** @return milliseconds until the next question (game-time milliseconds in GAME_TIME mode), 0 when due. */

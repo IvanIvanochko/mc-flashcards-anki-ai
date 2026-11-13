@@ -14,6 +14,11 @@ public record RewardPreset(String name, String description, ModConfig.CommandSel
     public static final RewardPreset CUSTOM = new RewardPreset("Custom", "Your own commands.",
             ModConfig.CommandSelectionStrategy.EXECUTE_ALL, List.of(), List.of());
 
+    /** Only offered for a deck: don't override anything, use the main rewards and penalties. */
+    public static final RewardPreset SAME_AS_MAIN = new RewardPreset("Same as main",
+            "This deck uses the rewards and penalties from the main settings (shown below).",
+            ModConfig.CommandSelectionStrategy.EXECUTE_ALL, List.of(), List.of());
+
     public static final RewardPreset NONE = new RewardPreset("None", "No rewards and no penalties.",
             ModConfig.CommandSelectionStrategy.OFF, List.of(), List.of());
 

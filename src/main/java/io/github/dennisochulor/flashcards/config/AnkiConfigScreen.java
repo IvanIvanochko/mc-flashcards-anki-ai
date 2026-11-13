@@ -125,6 +125,7 @@ class AnkiConfigScreen extends Screen {
 
     @Override
     protected void init() {
+        doneButton.setTooltip(Tooltip.create(Component.literal("Save these settings and go back")));
         initialized = true;
         int x = width / 2 - WIDGET_WIDTH / 2;
         int y = 8;
