@@ -140,32 +140,27 @@ Settings in **AI Grading...** (saved in `config/flashcards/config.json`, so they
 Small models sometimes misjudge, which is why Again is always available and score adjusting exists.
 
 ### Auto-grading
-When the AI finishes grading while you're playing (with *Play while thinking*, or after *Keep playing*), the thinking animation turns into the result:
+When the AI finishes grading while you're playing (with *Play while thinking*, or after *Keep playing*), the thinking animation is replaced by the **result panel**:
 
-- the grade and score (e.g. **GOOD 0.83**), in the grade's colour,
-- a countdown with a shrinking bar ("auto in 4s"),
+- a badge with the grade in its colour (e.g. **GOOD**) and the score,
+- the countdown: one pip per second and "auto in 3s", plus a line along the panel's bottom edge that shrinks,
+- a score meter: the Again / Hard / Good / Easy bands split at your cut-offs, the band you reached lit up, a marker at your score,
 - the start of the AI's explanation, cut off with "..." after a set number of characters,
-- which key opens the card: **R** by default ("Open graded card", changeable in Minecraft's Controls under the Flashcards category).
+- a key cap showing which key opens the card: **R** by default ("Open graded card", changeable in Minecraft's Controls under the Flashcards category).
+
+The result panel is its own element: move and resize it in **HUD Layout...** (it's the third panel there, next to the study panel and the thinking indicator).
 
 If you don't press the key before the countdown ends, the AI's grade is applied on its own: the best button the score unlocks (0.83 → Good with the default cut-offs) is sent to Anki, and the action bar says "Auto-graded Good (0.83)". Press the key instead and the card opens as usual, so you can read everything and pick the grade yourself. The countdown pauses while a menu is open.
 
-**Which grades are applied on their own** is up to you, for all decks and per deck. A grade that isn't on the list brings the card back on screen instead, as before (after the minimum play time), so you see what you missed:
-
-| Choice | Applied on their own | Card comes back for |
-|---|---|---|
-| Never | none | every grade |
-| Easy only | Easy | Good, Hard, Again |
-| **Good and Easy** (default) | Good, Easy | Hard, Again |
-| Hard and up | Hard, Good, Easy | Again |
-| Every grade | all, Again too | none |
+**Which grades are applied on their own** is up to you, for all decks and per deck: four switches, **Again**, **Hard**, **Good** and **Easy**, in the look of the card's grade buttons (a switched-on grade looks pressable, with a bright strip in its colour; a switched-off one looks locked, with a faint strip). A grade that's switched off brings the card back on screen instead, as before (after the minimum play time), so you see what you missed. By default **Good** and **Easy** are on. Any combination works: all off is the same as auto-grading off, all on applies every grade.
 
 Settings in **AI Grading... → Auto-grade...**:
 - **Auto-grading** ON/OFF (default ON). OFF: a graded card always comes back for you to grade.
-- **Apply on their own**: the choice above, for decks that don't have their own.
+- **Apply these grades on their own**: the four switches above, for decks that don't have their own choice.
 - **Countdown**: 1-30 seconds (default 5).
 - **Explanation on the HUD**: how many characters of the explanation to show before "..." (default 140).
 
-Per deck: **Deck Presets... → Auto-grade** (click to cycle; *Default* follows the main choice). For example, *Every grade* for an easy vocabulary deck, *Never* for a deck you want to review carefully.
+Per deck: **Deck Presets... → Auto-grade**. The same four switches; they show the default until you click one, which gives the deck its own choice (the label then says *own*, and ↺ goes back to the default). For example, all on for an easy vocabulary deck, all off for a deck you want to review carefully.
 
 A card that the AI found too vague (second chance) or couldn't grade always comes back on screen, and the panel says so. The key opens it straight away there too.
 
@@ -256,7 +251,7 @@ A small panel shows:
 - how many cards you answered this session (correct ✔ / wrong ✘),
 - in Anki mode: cards reviewed today in Anki (all devices) and what's still **Due** in your deck as three numbers in Anki's own colours and order: blue = new, red = learning, green = to review (after Anki's daily limits).
 
-**Moving and resizing:** Flashcards config → **HUD Layout...** Drag the study panel or the AI thinking indicator anywhere; scroll over one (or press `+` / `-`) to resize it from 50% to 300%; arrow keys nudge by a pixel (Shift = 10). Panels snap to the screen's centre lines and can't leave the screen, and they keep their relative position if you resize the window. **Reset** puts both back.
+**Moving and resizing:** Flashcards config → **HUD Layout...** Drag any of the three panels (the study panel, the AI thinking indicator, the AI result panel) anywhere; Tab switches between them; scroll over one (or press `+` / `-`) to resize it from 50% to 300%; arrow keys nudge by a pixel (Shift = 10). Panels snap to the screen's centre lines and can't leave the screen, and they keep their relative position if you resize the window. **Reset** puts all three back.
 
 ### Card keys
 Flashcards config → **General... → Card Keys...** Click a key button and press the new key (Esc cancels).

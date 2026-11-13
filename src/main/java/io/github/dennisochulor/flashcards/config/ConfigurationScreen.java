@@ -43,7 +43,7 @@ public class ConfigurationScreen extends Screen {
     private final Button deckPresetsButton = Button.builder(Component.literal("Deck Presets..."), _ -> Minecraft.getInstance().gui.setScreen(new DeckPresetsScreen()))
             .tooltip(Tooltip.create(Component.literal("Give each Anki deck its own AI model, grading prompt and rewards"))).build();
     private final Button hudLayoutButton = Button.builder(Component.literal("HUD Layout..."), _ -> Minecraft.getInstance().gui.setScreen(new HudLayoutScreen()))
-            .tooltip(Tooltip.create(Component.literal("Move and resize the study panel and the AI thinking indicator"))).build();
+            .tooltip(Tooltip.create(Component.literal("Move and resize the study panel, the AI thinking indicator and the AI result panel"))).build();
     private final Button ankiConfigButton = Button.builder(Component.literal("Anki Sync..."), _ -> Minecraft.getInstance().gui.setScreen(new AnkiConfigScreen()))
             .tooltip(Tooltip.create(Component.literal("Study your real Anki deck in-game"))).build();
     private final Button aiGradingButton = Button.builder(Component.literal("AI Grading..."), _ -> Minecraft.getInstance().gui.setScreen(new AiGradingConfigScreen()))

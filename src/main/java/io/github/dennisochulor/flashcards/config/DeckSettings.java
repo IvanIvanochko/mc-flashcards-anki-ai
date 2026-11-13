@@ -15,11 +15,11 @@ import java.util.List;
  * @param intervalSeconds time until the next question after a card from this deck
  * @param notes  the deck's notes for the grader, or ""
  * @param layout how big things are on this deck's cards
- * @param autoGradeFrom which grades are applied on their own when this deck's card is graded while playing
+ * @param autoGrades which grades are applied on their own when this deck's card is graded while playing
  */
 public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> correctCommands, List<String> wrongCommands,
                            ModConfig.CommandSelectionStrategy strategy, int intervalSeconds, String notes, ModConfig.CardLayout layout,
-                           ModConfig.AutoGradeFrom autoGradeFrom) {
+                           ModConfig.AutoGrades autoGrades) {
 
     /** The complete instructions the grading AI gets for a card from this deck. */
     public String systemPrompt() {
@@ -38,7 +38,7 @@ public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> c
 
         String notes = "";
         ModConfig.CardLayout layout = config.cardLayout();
-        ModConfig.AutoGradeFrom autoGradeFrom = config.aiGrading().autoGrading().from();
+        ModConfig.AutoGrades autoGrades = config.aiGrading().autoGrading().grades();
 
         boolean modelSet = false, promptSet = false, rewardsSet = false, intervalSet = false, notesSet = false, layoutSet = false, autoSet = false;
         String name = deck == null ? "" : deck;
@@ -59,9 +59,9 @@ public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> c
                     strategy = profile.strategy();
                     rewardsSet = true;
                 }
-                ModConfig.AutoGradeFrom ownAuto = profile.autoGradeFrom();
+                ModConfig.AutoGrades ownAuto = profile.autoGrades();
                 if (!autoSet && ownAuto != null) {
-                    autoGradeFrom = ownAuto;
+                    autoGrades = ownAuto;
                     autoSet = true;
                 }
                 ModConfig.CardLayout own = profile.layout();
@@ -81,7 +81,7 @@ public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> c
             int parentEnd = name.lastIndexOf("::");
             name = parentEnd < 0 ? "" : name.substring(0, parentEnd);
         }
-        return new DeckSettings(ai, prompt, correct, wrong, strategy, interval, notes, layout, autoGradeFrom);
+        return new DeckSettings(ai, prompt, correct, wrong, strategy, interval, notes, layout, autoGrades);
     }
 
     /** @return the profile saved for exactly this deck, or null */

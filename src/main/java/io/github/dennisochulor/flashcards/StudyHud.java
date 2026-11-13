@@ -73,7 +73,7 @@ public final class StudyHud {
             if (waiting.isGrading()) {
                 drawIndicator(graphics, minecraft.font, config.indicatorPlacement(), waiting.modelName(), waiting.gradingElapsedMillis(), 0);
             }
-            else drawStatus(graphics, minecraft.font, config.indicatorPlacement(), waiting.modelName(), waiting.backgroundStatus());
+            else drawStatus(graphics, minecraft.font, config.resultPlacement(), waiting.backgroundStatus());
         }
         if (config.hudEnabled()) drawStats(graphics, minecraft, config, config.hudPlacement());
     }
@@ -314,33 +314,56 @@ public final class StudyHud {
 
     // ---------------------------------------------------------------- the AI's result, while playing
 
+    /** Inner width of the result panel. */
+    private static final int RESULT_INNER_WIDTH = 236;
+    private static final int METER_HEIGHT = 3;
+    private static final int PIP = 4, PIP_GAP = 2, MAX_PIPS = 10;
+    private static final int[] BAND_COLORS = {0xFFFF7070, 0xFFFFD75A, 0xFF5FD07A, 0xFF55AAFF}; // Again, Hard, Good, Easy
+
     private static String wrappedText = "";
-    private static int wrappedWidth = -1;
     private static List<FormattedCharSequence> wrappedLines = List.of();
 
-    /** Wraps the explanation once per text and width, not every frame. */
-    private static List<FormattedCharSequence> wrap(Font font, String text, int width) {
-        if (!text.equals(wrappedText) || width != wrappedWidth) {
+    /** Wraps the explanation once per text, not every frame. */
+    private static List<FormattedCharSequence> wrap(Font font, String text) {
+        if (!text.equals(wrappedText)) {
             wrappedText = text;
-            wrappedWidth = width;
-            wrappedLines = text.isEmpty() ? List.of() : font.split(Component.literal(text), width);
+            wrappedLines = text.isEmpty() ? List.of() : font.split(Component.literal(text), RESULT_INNER_WIDTH);
         }
         return wrappedLines;
     }
 
-    /**
-     * The AI's result for a card that's off screen, in the indicator's place: the grade and score, what happens next
-     * ("auto in 4s" with a shrinking bar, or "back in 3s"), the start of the AI's explanation, and which key opens the card.
-     */
-    public static void drawStatus(GuiGraphicsExtractor graphics, Font font, ModConfig.Placement placement, String model,
-                                  AnkiQuestionScreen.BackgroundStatus status) {
-        int innerWidth = ThinkingAnimation.width(font, model); // same width as the thinking animation, so the panel doesn't jump
-        List<FormattedCharSequence> lines = wrap(font, status.text(), innerWidth);
-        boolean bar = status.progress() >= 0;
-        int width = ACCENT_WIDTH + PAD + innerWidth + PAD;
-        int height = PAD + font.lineHeight + (bar ? 5 : 2) + lines.size() * font.lineHeight
-                + (status.hint().isEmpty() ? 0 : 3 + font.lineHeight) + PAD - 1;
+    /** @return {width, height} of the result panel for this status, before scaling */
+    public static int[] statusSize(Font font, AnkiQuestionScreen.BackgroundStatus status) {
+        int height = PAD + badgeHeight(font)                                   // badge row
+                + (status.score() >= 0 ? 5 + METER_HEIGHT : 0)                 // score meter
+                + 5 + wrap(font, status.text()).size() * font.lineHeight       // explanation
+                + 5 + keyCapHeight(font)                                       // key hint
+                + PAD + (status.progress() >= 0 ? 2 : 0);                      // countdown line
+        return new int[] {ACCENT_WIDTH + PAD + RESULT_INNER_WIDTH + PAD, height};
+    }
 
+    private static int badgeHeight(Font font) {
+        return font.lineHeight + 5;
+    }
+
+    private static int keyCapHeight(Font font) {
+        return font.lineHeight + 4;
+    }
+
+    /**
+     * The AI's result for a card that's off screen, as its own HUD element:
+     * <pre>
+     * ┃ [ GOOD ] 0.83                 ■ ■ ■ □ □  auto in 3s
+     * ┃ ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬|▬▬▬▬▬     (Again / Hard / Good / Easy, marker at the score)
+     * ┃ You explained the main idea correctly, but...
+     * ┃ [R] open the card and grade it yourself
+     * ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ (the countdown, shrinking)
+     * </pre>
+     */
+    public static void drawStatus(GuiGraphicsExtractor graphics, Font font, ModConfig.Placement placement,
+                                  AnkiQuestionScreen.BackgroundStatus status) {
+        int[] size = statusSize(font, status);
+        int width = size[0], height = size[1];
         float scale = placement.scale().floatValue();
         int left = placement.left(graphics.guiWidth(), width);
         int top = placement.top(graphics.guiHeight(), height);
@@ -352,20 +375,83 @@ public final class StudyHud {
         int x = ACCENT_WIDTH + PAD;
         int right = width - PAD;
         int y = PAD;
-        graphics.text(font, status.title(), x, y, status.color(), true);
-        graphics.text(font, status.right(), right - font.width(status.right()), y, GRAY, true);
-        y += font.lineHeight + 1;
-        if (bar) { // the time left before the grade is applied
-            graphics.fill(x, y, right, y + 2, BAR_TRACK);
-            graphics.fill(x, y, x + Math.round((right - x) * Math.min(1, status.progress())), y + 2, status.color());
-            y += 4;
+
+        // badge: the grade in a pill of its colour, then the score
+        int badgeWidth = font.width(status.label()) + 10;
+        int badgeHeight = badgeHeight(font);
+        graphics.fill(x, y, x + badgeWidth, y + badgeHeight, withAlpha(status.color(), 0x40));
+        graphics.outline(x, y, badgeWidth, badgeHeight, withAlpha(status.color(), 0xC0));
+        graphics.text(font, status.label(), x + 5, y + 3, status.color(), true);
+        if (status.score() >= 0) {
+            graphics.text(font, String.format(java.util.Locale.ROOT, "%.2f", status.score()), x + badgeWidth + 6, y + 3, CommonColors.WHITE, true);
         }
-        else y += 1;
-        for (FormattedCharSequence line : lines) {
+
+        // right side: what happens next, with one pip per second of the countdown
+        int textX = right - font.width(status.right());
+        graphics.text(font, status.right(), textX, y + 3, GRAY, true);
+        if (status.progress() >= 0 && status.totalSeconds() <= MAX_PIPS) {
+            int pipsWidth = status.totalSeconds() * (PIP + PIP_GAP) - PIP_GAP;
+            int pipX = textX - 6 - pipsWidth;
+            int pipY = y + (badgeHeight - PIP) / 2;
+            for (int i = 0; i < status.totalSeconds(); i++) {
+                boolean left_ = i < status.secondsLeft();
+                graphics.fill(pipX, pipY, pipX + PIP, pipY + PIP, left_ ? status.color() : 0x40FFFFFF);
+                pipX += PIP + PIP_GAP;
+            }
+        }
+        y += badgeHeight;
+
+        // score meter: Again / Hard / Good / Easy bands split at the cut-offs, the reached band bright, a marker at the score
+        if (status.score() >= 0) {
+            y += 5;
+            double[] edges = {0, status.cutoffs()[0], status.cutoffs()[1], status.cutoffs()[2], 1};
+            int meterWidth = right - x;
+            int reached = 0;
+            for (int band = 0; band < 4; band++) if (status.score() >= edges[band] - 1e-9) reached = band;
+            for (int band = 0; band < 4; band++) {
+                int from = x + (int) Math.round(edges[band] * meterWidth);
+                int to = x + (int) Math.round(edges[band + 1] * meterWidth);
+                if (to <= from) continue;
+                graphics.fill(from, y, to - (band < 3 ? 1 : 0), y + METER_HEIGHT, withAlpha(BAND_COLORS[band], band == reached ? 0xFF : 0x50));
+            }
+            int marker = x + (int) Math.round(Math.min(1, Math.max(0, status.score())) * (meterWidth - 2));
+            graphics.fill(marker - 1, y - 2, marker + 3, y + METER_HEIGHT + 2, 0xFF000000);
+            graphics.fill(marker, y - 2, marker + 2, y + METER_HEIGHT + 2, CommonColors.WHITE);
+            y += METER_HEIGHT;
+        }
+
+        // the start of the explanation
+        y += 5;
+        for (FormattedCharSequence line : wrap(font, status.text())) {
             graphics.text(font, line, x, y, CommonColors.WHITE, true);
             y += font.lineHeight;
         }
-        if (!status.hint().isEmpty()) graphics.text(font, status.hint(), x, y + 3, DIM, true);
+
+        // the key that opens the card, drawn as a key cap
+        y += 5;
+        String key = status.key();
+        if (key != null) {
+            int capWidth = Math.max(font.width(key) + 7, keyCapHeight(font));
+            int capHeight = keyCapHeight(font);
+            graphics.fill(x, y, x + capWidth, y + capHeight, 0xFF2A2D36);
+            graphics.outline(x, y, capWidth, capHeight, 0xFF8A8F99);
+            graphics.fill(x + 1, y + capHeight - 2, x + capWidth - 1, y + capHeight - 1, 0xFF1A1C22); // a little depth
+            graphics.text(font, key, x + (capWidth - font.width(key)) / 2, y + 2, CommonColors.WHITE, false);
+            graphics.text(font, status.keyAction(), x + capWidth + 5, y + 2, GRAY, true);
+        }
+        else {
+            graphics.text(font, "Set \"Open graded card\" in Controls to open it", x, y + 2, DIM, true);
+        }
+
+        // countdown along the bottom edge
+        if (status.progress() >= 0) {
+            int barWidth = Math.round((width - ACCENT_WIDTH) * Math.min(1, status.progress()));
+            graphics.fill(ACCENT_WIDTH, height - 2, ACCENT_WIDTH + barWidth, height, status.color());
+        }
         graphics.pose().popMatrix();
+    }
+
+    private static int withAlpha(int color, int alpha) {
+        return (alpha << 24) | (color & 0x00FFFFFF);
     }
 }

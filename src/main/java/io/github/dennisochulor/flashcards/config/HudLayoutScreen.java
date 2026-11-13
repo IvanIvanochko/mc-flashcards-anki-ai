@@ -3,6 +3,7 @@ package io.github.dennisochulor.flashcards.config;
 import com.mojang.blaze3d.platform.InputConstants;
 import io.github.dennisochulor.flashcards.FileManager;
 import io.github.dennisochulor.flashcards.StudyHud;
+import io.github.dennisochulor.flashcards.questions.AnkiQuestionScreen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -19,7 +20,7 @@ import java.util.Locale;
 import java.util.Objects;
 
 /**
- * Drag the study panel and the "AI is thinking" indicator anywhere on screen and resize them
+ * Drag the study panel, the "AI is thinking" indicator and the AI result panel anywhere on screen and resize them
  * (mouse wheel over a panel, or +/- for the selected one). Panels snap to the screen centre lines and edges.
  */
 class HudLayoutScreen extends Screen {
@@ -67,6 +68,7 @@ class HudLayoutScreen extends Screen {
     private final Screen parent;
     private final Item stats;
     private final Item indicator;
+    private final Item result;
     private final Item[] items;
     private final String sampleModel;
     private final long openedMillis = System.currentTimeMillis();
@@ -77,7 +79,7 @@ class HudLayoutScreen extends Screen {
     private boolean guideX = false, guideY = false;
 
     private final Button resetButton = Button.builder(Component.literal("Reset"), _ -> reset())
-            .tooltip(Tooltip.create(Component.literal("Put both panels back where they started, at normal size"))).size(70, 20).build();
+            .tooltip(Tooltip.create(Component.literal("Put all three panels back where they started, at normal size"))).size(70, 20).build();
     private final Button doneButton = Button.builder(Component.literal("Done"), _ -> this.onClose()).size(70, 20).build();
 
     HudLayoutScreen() {
@@ -86,7 +88,8 @@ class HudLayoutScreen extends Screen {
         ModConfig config = FileManager.getConfig();
         stats = new Item("Study panel", config.hudPlacement());
         indicator = new Item("AI thinking indicator", config.indicatorPlacement());
-        items = new Item[] {indicator, stats}; // drawn in this order; the first one that contains the mouse wins
+        result = new Item("AI result (auto-grading)", config.resultPlacement());
+        items = new Item[] {result, indicator, stats}; // drawn in this order; the first one that contains the mouse wins
         selected = stats;
         String model = config.aiGrading().model();
         sampleModel = model.isBlank() ? "qwen2.5:7b" : model;
@@ -95,6 +98,7 @@ class HudLayoutScreen extends Screen {
     private void reset() {
         stats.placement = ModConfig.Placement.DEFAULT_HUD;
         indicator.placement = ModConfig.Placement.DEFAULT_INDICATOR;
+        result.placement = ModConfig.Placement.DEFAULT_RESULT;
     }
 
     @Override
@@ -127,6 +131,9 @@ class HudLayoutScreen extends Screen {
         int[] i = StudyHud.indicatorSize(minecraft.font, sampleModel);
         indicator.width = i[0];
         indicator.height = i[1];
+        int[] r = StudyHud.statusSize(minecraft.font, AnkiQuestionScreen.sampleStatus(0));
+        result.width = r[0];
+        result.height = r[1];
     }
 
     private @Nullable Item itemAt(double x, double y) {
@@ -150,6 +157,7 @@ class HudLayoutScreen extends Screen {
         StudyHud.drawStats(graphics, minecraft, FileManager.getConfig(), stats.placement);
         long sampleElapsed = (System.currentTimeMillis() - openedMillis) % 9000;
         StudyHud.drawIndicator(graphics, font, indicator.placement, sampleModel, sampleElapsed, 0);
+        StudyHud.drawStatus(graphics, font, result.placement, AnkiQuestionScreen.sampleStatus(System.currentTimeMillis() - openedMillis));
 
         Item hovered = dragging != null ? dragging : itemAt(mouseX, mouseY);
         for (Item item : items) {
@@ -237,7 +245,7 @@ class HudLayoutScreen extends Screen {
                 case InputConstants.KEY_RIGHT -> { item.moveTo(item.left() + step, item.top()); return true; }
                 case InputConstants.KEY_UP -> { item.moveTo(item.left(), item.top() - step); return true; }
                 case InputConstants.KEY_DOWN -> { item.moveTo(item.left(), item.top() + step); return true; }
-                case InputConstants.KEY_TAB -> { selected = item == stats ? indicator : stats; return true; }
+                case InputConstants.KEY_TAB -> { selected = item == stats ? indicator : item == indicator ? result : stats; return true; }
                 default -> {}
             }
         }
@@ -246,7 +254,7 @@ class HudLayoutScreen extends Screen {
 
     @Override
     public void onClose() {
-        FileManager.updateConfig(FileManager.getConfig().withPlacements(stats.placement, indicator.placement));
+        FileManager.updateConfig(FileManager.getConfig().withPlacements(stats.placement, indicator.placement, result.placement));
         Minecraft.getInstance().gui.setScreen(parent);
     }
 }

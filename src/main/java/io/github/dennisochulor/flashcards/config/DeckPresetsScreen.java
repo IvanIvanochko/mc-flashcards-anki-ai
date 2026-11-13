@@ -43,10 +43,10 @@ class DeckPresetsScreen extends Screen {
         RewardsConfigScreen.Rewards rewards = NO_REWARDS;
         int intervalSeconds = 0; // 0 = default
         ModConfig.@Nullable CardLayout layout = null; // null = default sizes
-        ModConfig.@Nullable AutoGradeFrom autoGradeFrom = null; // null = the main setting
+        ModConfig.@Nullable AutoGrades autoGrades = null; // null = the main setting
 
         boolean isDefault() {
-            return model.isBlank() && prompt.isBlank() && notes.isBlank() && !customRewards && intervalSeconds == 0 && layout == null && autoGradeFrom == null;
+            return model.isBlank() && prompt.isBlank() && notes.isBlank() && !customRewards && intervalSeconds == 0 && layout == null && autoGrades == null;
         }
     }
 
@@ -86,17 +86,17 @@ class DeckPresetsScreen extends Screen {
     private final EditBox secondsBox = new EditBox(Minecraft.getInstance().font, 30, 20, Component.literal("Seconds"));
     private String timeBoxesShow = ""; // which deck's time the two boxes currently hold
     private boolean fillingTimeBoxes = false;
-    private final Button autoGradeButton = Button.builder(Component.empty(), _ -> {
-        Draft draft = draft();
-        ModConfig.AutoGradeFrom[] values = ModConfig.AutoGradeFrom.values();
-        // Default -> Never -> Easy only -> ... -> Every grade -> Default
-        int next = draft.autoGradeFrom == null ? 0 : draft.autoGradeFrom.ordinal() + 1;
-        draft.autoGradeFrom = next >= values.length ? null : values[next];
+    // auto-grade: the label says Default/Own, the four switches show what applies, ↺ goes back to Default
+    private final StringWidget autoGradeLabel = new StringWidget(Component.empty(), Minecraft.getInstance().font);
+    private final List<GradeToggles.Toggle> autoGradeToggles = GradeToggles.create(ModConfig.AutoGrades.DEFAULT, changed -> {
+        draft().autoGrades = changed; // touching a switch gives the deck its own choice
         needsRebuild = true;
-    }).tooltip(Tooltip.create(Component.literal(
-            "Which AI grades are applied on their own when this deck's card is graded while you play (auto-grading).\n"
-            + "E.g. \"Good and Easy\": a good answer is applied after the countdown, a weak one brings the card back so you see what you missed.\n"
-            + "Click to cycle. Default follows the main setting (AI Grading → Auto-grade)."))).build();
+    });
+    private final Button autoGradeResetButton = Button.builder(Component.literal("↺"), _ -> {
+        draft().autoGrades = null;
+        needsRebuild = true;
+    }).tooltip(Tooltip.create(Component.literal("Back to Default: this deck follows the main choice (AI Grading → Auto-grade) again.")))
+            .size(18, 12).build();
     private final Button sizeButton = Button.builder(Component.empty(), _ -> openCardSize())
             .tooltip(Tooltip.create(Component.literal(
                     "Give this deck its own card sizes: how far the answer area may grow, how tall pictures may be, how wide the card is.\n"
@@ -120,7 +120,7 @@ class DeckPresetsScreen extends Screen {
             draft.intervalSeconds = profile.intervalSeconds();
             draft.notes = profile.notes();
             draft.layout = profile.layout();
-            draft.autoGradeFrom = profile.autoGradeFrom();
+            draft.autoGrades = profile.autoGrades();
             drafts.put(profile.deck(), draft);
         }
         selected = config.ankiDeck();
@@ -250,8 +250,8 @@ class DeckPresetsScreen extends Screen {
     private ModConfig withDraftsAboveSelected() {
         List<ModConfig.DeckProfile> profiles = new ArrayList<>();
         drafts.forEach((deck, draft) -> {
-            if (deck.isBlank() || deck.equals(selected) || draft.autoGradeFrom == null) return;
-            profiles.add(ModConfig.DeckProfile.empty(deck).withAutoGradeFrom(draft.autoGradeFrom));
+            if (deck.isBlank() || deck.equals(selected) || draft.autoGrades == null) return;
+            profiles.add(ModConfig.DeckProfile.empty(deck).withAutoGrades(draft.autoGrades));
         });
         return FileManager.getConfig().withDeckProfiles(profiles);
     }
@@ -404,12 +404,24 @@ class DeckPresetsScreen extends Screen {
         }
         else timeBoxesShow = "";
 
-        ModConfig.AutoGradeFrom inheritedAuto = DeckSettings.forDeck(withDraftsAboveSelected(), selected).autoGradeFrom();
-        autoGradeButton.setMessage(Component.literal("Auto-grade: " + (draft.autoGradeFrom == null
-                ? "Default (" + inheritedAuto.friendlyName + ")" : draft.autoGradeFrom.friendlyName)));
-        autoGradeButton.setRectangle(column, 20, rightX, y);
-        addRenderableWidget(autoGradeButton);
-        y += 24;
+        boolean ownAuto = draft.autoGrades != null;
+        ModConfig.AutoGrades shownAuto = ownAuto ? draft.autoGrades : DeckSettings.forDeck(withDraftsAboveSelected(), selected).autoGrades();
+        autoGradeLabel.setMessage(Component.literal("Auto-grade: ").withColor(GRAY)
+                .append(ownAuto ? Component.literal("own").withColor(CommonColors.GREEN) : Component.literal("default").withColor(GRAY)));
+        autoGradeLabel.setTooltip(Tooltip.create(Component.literal(
+                "Which AI grades are applied on their own when this deck's card is graded while you play. "
+                + "Switched-off grades bring the card back so you see what you missed.\n"
+                + (ownAuto ? "This deck has its own choice; ↺ goes back to the default." : "Showing the default; click a switch to give this deck its own."))));
+        autoGradeLabel.setPosition(rightX, y + 2);
+        addRenderableWidget(autoGradeLabel);
+        if (ownAuto) {
+            autoGradeResetButton.setPosition(rightX + column - autoGradeResetButton.getWidth(), y);
+            addRenderableWidget(autoGradeResetButton);
+        }
+        y += 13;
+        GradeToggles.show(autoGradeToggles, shownAuto);
+        y += GradeToggles.place(autoGradeToggles, rightX, y, column) + 3;
+        autoGradeToggles.forEach(this::addRenderableWidget);
 
         sizeButton.setMessage(Component.literal("Card size: " + (draft.layout == null ? "Default" : "Own") + "..."));
         sizeButton.setRectangle(column, 20, rightX, y);
@@ -433,7 +445,7 @@ class DeckPresetsScreen extends Screen {
         drafts.forEach((deck, draft) -> {
             if (deck.isBlank() || draft.isDefault()) return;
             profiles.add(new ModConfig.DeckProfile(deck, draft.model, draft.prompt, draft.customRewards, draft.rewards.presetName(),
-                    draft.rewards.correct(), draft.rewards.wrong(), draft.rewards.strategy(), draft.intervalSeconds, draft.notes, draft.layout, draft.autoGradeFrom));
+                    draft.rewards.correct(), draft.rewards.wrong(), draft.rewards.strategy(), draft.intervalSeconds, draft.notes, draft.layout, draft.autoGrades));
         });
         FileManager.updateConfig(FileManager.getConfig().withDeckProfiles(profiles));
         QuestionScheduler.deckPresetsChanged(); // a running countdown follows a changed time straight away

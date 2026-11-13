@@ -77,7 +77,7 @@ class AiGradingConfigScreen extends Screen {
             .create(0, 0, WIDGET_WIDTH / 2 - 2, 20, Component.literal("Play while thinking"));
 
     private final Button indicatorButton = Button.builder(Component.literal("HUD layout..."), _ -> Minecraft.getInstance().gui.setScreen(new HudLayoutScreen()))
-            .tooltip(Tooltip.create(Component.literal("Move and resize the \"AI is thinking\" animation that shows while you keep playing.")))
+            .tooltip(Tooltip.create(Component.literal("Move and resize what shows while you keep playing: the \"AI is thinking\" animation, and the AI's result (grade, countdown, explanation).")))
             .size(WIDGET_WIDTH / 2 - 2, 20).build();
 
     private final Button promptButton = Button.builder(Component.empty(), _ -> Minecraft.getInstance().gui.setScreen(

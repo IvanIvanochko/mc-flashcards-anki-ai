@@ -12,6 +12,7 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -27,8 +28,10 @@ class AutoGradingScreen extends Screen {
     private final StringWidget titleText = new StringWidget(Component.literal("Auto-grading"), Minecraft.getInstance().font);
     private final MultiLineTextWidget intro;
     private final CycleButton<Boolean> enabledButton;
-    private final CycleButton<ModConfig.AutoGradeFrom> fromButton;
-    private final MultiLineTextWidget fromDescription = new MultiLineTextWidget(Component.empty(), Minecraft.getInstance().font);
+    private final StringWidget gradesLabel = new StringWidget(Component.literal("Apply these grades on their own:"), Minecraft.getInstance().font);
+    private final List<GradeToggles.Toggle> gradeToggles;
+    private ModConfig.AutoGrades grades;
+    private final MultiLineTextWidget gradesDescription = new MultiLineTextWidget(Component.empty(), Minecraft.getInstance().font);
     private final IntSlider secondsSlider;
     private final IntSlider textSlider;
     private final Button doneButton = Button.builder(Component.literal("Done"), _ -> this.onClose())
@@ -53,14 +56,13 @@ class AutoGradingScreen extends Screen {
                         + "OFF: a graded card always comes back on screen for you to grade, as before.")))
                 .create(0, 0, WIDTH, 20, Component.literal("Auto-grading"));
 
-        fromButton = new CycleButton.Builder<ModConfig.AutoGradeFrom>(from -> Component.literal(from.friendlyName), auto::from)
-                .withValues(ModConfig.AutoGradeFrom.values())
-                .withTooltip(from -> Tooltip.create(Component.literal(
-                        "Which grades are applied on their own. The others bring the card back so you can see what you missed.\n"
-                        + "Each deck can have its own choice: Deck Presets.")))
-                .create(0, 0, WIDTH, 20, Component.literal("Apply on their own"), (_, from) -> updateDescription(from));
-        fromDescription.setCentered(true);
-        updateDescription(auto.from());
+        grades = auto.grades();
+        gradeToggles = GradeToggles.create(grades, changed -> {
+            grades = changed;
+            updateDescription();
+        });
+        gradesDescription.setCentered(true);
+        updateDescription();
 
         secondsSlider = new IntSlider(WIDTH, 20, 1, ModConfig.AutoGrading.MAX_SECONDS, auto.seconds(),
                 seconds -> Component.literal("Countdown: " + seconds + " s"));
@@ -74,9 +76,16 @@ class AutoGradingScreen extends Screen {
                 + "open the card to read all of it.")));
     }
 
-    private void updateDescription(ModConfig.AutoGradeFrom from) {
-        fromDescription.setMessage(Component.literal(from.description).withColor(GRAY));
-        fromDescription.setX(width / 2 - fromDescription.getWidth() / 2);
+    /** Says in words what the switches mean right now. */
+    private void updateDescription() {
+        String on = grades.describe();
+        String text = switch (on) {
+            case "none" -> "Every graded card comes back on screen for you to grade (like auto-grading off).";
+            case "all" -> "Every grade is applied on its own, Again too. The card only comes back if you press the key.";
+            default -> on + ": applied on their own. The other grades bring the card back, so you see what you missed.";
+        };
+        gradesDescription.setMessage(Component.literal(text + " Each deck can have its own choice (Deck Presets).").withColor(GRAY));
+        gradesDescription.setX(width / 2 - gradesDescription.getWidth() / 2);
     }
 
     @Override
@@ -95,13 +104,15 @@ class AutoGradingScreen extends Screen {
         enabledButton.setRectangle(w, 20, x, y);
         addRenderableWidget(enabledButton);
         y += 24;
-        fromButton.setRectangle(w, 20, x, y);
-        addRenderableWidget(fromButton);
-        y += 22;
-        fromDescription.setMaxWidth(w);
-        fromDescription.setPosition(width / 2 - fromDescription.getWidth() / 2, y);
-        addRenderableWidget(fromDescription);
-        y += fromDescription.getHeight() + 6;
+        gradesLabel.setPosition(x, y);
+        addRenderableWidget(gradesLabel);
+        y += 12;
+        y += GradeToggles.place(gradeToggles, x, y, w) + 3;
+        gradeToggles.forEach(this::addRenderableWidget);
+        gradesDescription.setMaxWidth(w);
+        gradesDescription.setPosition(width / 2 - gradesDescription.getWidth() / 2, y);
+        addRenderableWidget(gradesDescription);
+        y += gradesDescription.getHeight() + 6;
         secondsSlider.setRectangle(w, 20, x, y);
         addRenderableWidget(secondsSlider);
         y += 24;
@@ -117,7 +128,7 @@ class AutoGradingScreen extends Screen {
     public void onClose() {
         ModConfig config = FileManager.getConfig();
         ModConfig.AutoGrading auto = new ModConfig.AutoGrading(enabledButton.getValue(), secondsSlider.intValue(),
-                fromButton.getValue(), textSlider.intValue());
+                grades, textSlider.intValue());
         FileManager.updateConfig(config.withAiGrading(config.aiGrading().withAutoGrading(auto)));
         Minecraft.getInstance().gui.setScreen(parent);
     }

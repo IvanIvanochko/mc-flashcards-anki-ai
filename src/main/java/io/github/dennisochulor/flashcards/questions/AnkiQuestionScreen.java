@@ -867,7 +867,7 @@ public class AnkiQuestionScreen extends Screen {
      */
     private void startAutoGradeIfAllowed() {
         ModConfig.AutoGrading auto = ai.autoGrading();
-        if (!auto.enabled() || !settings.autoGradeFrom().applies(suggestedEase4())) return;
+        if (!auto.enabled() || !settings.autoGrades().applies(suggestedEase4())) return;
         autoPending = true;
         autoRemainingMillis = auto.seconds() * 1000L;
         lastBackgroundTickMillis = System.currentTimeMillis();
@@ -889,35 +889,61 @@ public class AnkiQuestionScreen extends Screen {
         AnswerOutcome.runCommands(ease != AGAIN, card.deckName());
     }
 
-    /** What the HUD shows for a card that is waiting off screen. */
-    public record BackgroundStatus(String title, int color, String right, String text, String hint, float progress) {}
+    /**
+     * What the HUD shows for a card that is waiting off screen.
+     *
+     * @param label       the grade's name, or what went wrong ("TOO VAGUE", "NOT GRADED")
+     * @param color       the grade's colour
+     * @param score       the AI's score, or -1 when there is none
+     * @param cutoffs     Hard, Good and Easy cut-offs, for the score meter
+     * @param right       what happens next, e.g. "auto in 4s" or "back in 3s"
+     * @param text        the start of the AI's explanation
+     * @param key         the key that opens the card, or null if none is bound
+     * @param keyAction   what that key does here, e.g. "open the card and grade it yourself"
+     * @param progress    how much of the countdown is left (1 to 0), or -1 when there's no countdown
+     * @param secondsLeft whole seconds left on the countdown
+     * @param totalSeconds the countdown's full length in seconds
+     */
+    public record BackgroundStatus(String label, int color, double score, double[] cutoffs, String right, String text,
+                                   @Nullable String key, String keyAction, float progress, int secondsLeft, int totalSeconds) {}
 
     /** @return what to show on the HUD for this card while it's off screen (it's no longer "thinking") */
     public BackgroundStatus backgroundStatus() {
         String key = Flashcards.openCardKeyName();
-        String openHint = key == null ? "Open the card: set a key in Controls" : key + ": open the card";
+        double[] cutoffs = {ai.hardFrom(), ai.goodFrom(), ai.easyFrom()};
+        int textChars = ai.autoGrading().textChars();
+        int back = secondsUntilReturn();
+        String backText = back > 0 ? "back in " + back + "s" : "coming back";
         if (phase == Phase.GRADED && aiGrade != null) {
             String name = gradeNames.get(suggestedIndex());
-            String title = name.toUpperCase(Locale.ROOT) + "  " + format(score);
-            String text = shorten(aiGrade.feedback(), ai.autoGrading().textChars());
+            String text = shorten(aiGrade.feedback(), textChars);
             if (autoPending) {
-                long total = ai.autoGrading().seconds() * 1000L;
-                long seconds = (autoRemainingMillis + 999) / 1000;
+                int total = ai.autoGrading().seconds();
+                int seconds = (int) ((autoRemainingMillis + 999) / 1000);
                 boolean paused = Minecraft.getInstance().gui.screen() != null;
-                return new BackgroundStatus(title, buttonColor(name), paused ? "waiting" : "auto in " + seconds + "s", text,
-                        key == null ? "Not applied yet: set a key in Controls to open it" : key + ": open the card and grade it yourself",
-                        total <= 0 ? 0 : autoRemainingMillis / (float) total);
+                return new BackgroundStatus(name.toUpperCase(Locale.ROOT), buttonColor(name), score, cutoffs,
+                        paused ? "paused" : "auto in " + seconds + "s", text, key, "open the card and grade it yourself",
+                        total <= 0 ? 0 : autoRemainingMillis / (total * 1000f), seconds, total);
             }
-            int back = secondsUntilReturn();
-            return new BackgroundStatus(title, buttonColor(name), back > 0 ? "back in " + back + "s" : "coming back", text,
-                    key == null ? "" : key + ": open it now", -1);
+            return new BackgroundStatus(name.toUpperCase(Locale.ROOT), buttonColor(name), score, cutoffs, backText, text,
+                    key, "open it now", -1, 0, 0);
         }
         if (phase == Phase.SECOND_CHANCE) {
-            return new BackgroundStatus("TOO VAGUE", CommonColors.SOFT_YELLOW, secondsUntilReturn() > 0 ? "back in " + secondsUntilReturn() + "s" : "coming back",
-                    shorten(secondChanceHint, ai.autoGrading().textChars()), key == null ? "" : key + ": try again now", -1);
+            return new BackgroundStatus("TOO VAGUE", CommonColors.SOFT_YELLOW, -1, cutoffs, backText,
+                    "Second chance: " + shorten(secondChanceHint, textChars), key, "try again now", -1, 0, 0);
         }
-        return new BackgroundStatus("COULDN'T GRADE", CommonColors.SOFT_RED, secondsUntilReturn() > 0 ? "back in " + secondsUntilReturn() + "s" : "coming back",
-                shorten(gradeError, ai.autoGrading().textChars()), key == null ? "" : openHint, -1);
+        return new BackgroundStatus("NOT GRADED", CommonColors.SOFT_RED, -1, cutoffs, backText, shorten(gradeError, textChars),
+                key, "open it now", -1, 0, 0);
+    }
+
+    /** A made-up result, for previewing the panel in the HUD layout screen. */
+    public static BackgroundStatus sampleStatus(long millis) {
+        int total = 5;
+        float progress = 1 - (millis % (total * 1000L)) / (total * 1000f);
+        int seconds = (int) Math.ceil(progress * total);
+        return new BackgroundStatus("GOOD", CommonColors.GREEN, 0.83, new double[] {0.5, 0.7, 0.9}, "auto in " + seconds + "s",
+                "You explained the main idea correctly, but missed what makes one line better than another...",
+                Flashcards.openCardKeyName(), "open the card and grade it yourself", progress, seconds, total);
     }
 
     /** Cuts a text to {@code max} characters, at a word break where possible, and ends it with "...". */
