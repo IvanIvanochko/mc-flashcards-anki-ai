@@ -6,7 +6,7 @@ By [**IvanIvanochko**](https://github.com/IvanIvanochko). A fork of [Flashcards]
 ## What this edition adds
 - **Anki mode**: cards come from your real Anki deck and your answers are saved as real Anki reviews (Again / Hard / Good / Easy), so your spaced-repetition schedule keeps working while you play. Optional AnkiWeb sync on join/leave.
 - **AI grading**: type your answer and a local AI grades it by meaning, with a key-point checklist, a score meter and an explanation. The score unlocks Anki's buttons. One second chance for answers that are on the right track but too vague.
-- **Play while the AI thinks**: leave a slow grading with Space and keep playing; the card comes back when it's graded.
+- **Play while the AI thinks**: leave a slow grading with Space and keep playing. When the AI is done, its grade shows on the HUD and, if it's good enough, is applied on its own after a short countdown (auto-grading); otherwise the card comes back so you see what you missed.
 - **Deck presets**: each Anki deck can have its own AI model, notes for the AI, rewards and time between cards.
 - **Deck notes without prompt-writing**: tell the AI about a deck in a few sentences, with a guided form, a ready-made request for any AI, or your local AI writing them for you.
 - **Editable AI prompt**: read or rewrite the whole set of instructions the AI grades by.
@@ -107,6 +107,7 @@ On a card:
 - Type your answer in the box. **Enter** checks it (Shift+Enter starts a new line). While the AI thinks you see what it's doing and a progress bar.
 - **Slow AI?** If it thinks longer than your limit (default 15 s), a **Keep playing** button appears in the bottom-right corner (or press **Space** / Esc; the key can be changed). It closes the card and you play while the AI finishes, with a small "thinking" indicator on screen (just below the crosshair by default; move and resize it in **HUD Layout...**). When the grade is ready, the card comes back and the game pauses as usual, but never sooner than your minimum play time (default 5 s), and only once you've closed other menus and haven't just been hurt.
 - With **Play while thinking** ON (default OFF) you're sent back to the game as soon as you check an answer, without waiting on the card.
+- **When the AI finishes while you're playing**, see [Auto-grading](#auto-grading) below.
 - **Show Answer** means "I don't know": you see the answer and only **Again** is available.
 - **Second chance:** if your answer is *on the right track but too vague* (something true is in it, it just isn't pinned down) and it would fail (Again), the AI tells you what to be more specific about (without giving the answer away) and you can try once more; your first answer stays in the box to extend. There's no third try: after the second answer you get the grade, whatever it is. "I don't know", excuses, off-topic and wrong answers don't get a second chance, they're simply Again.
 - After grading you see the question, your answer, the AI's grade (a badge, plus a meter showing where your score lands between your cut-offs) with a **key-point checklist** (✔ correct, ~ partly, ✘ missing/wrong) and an explanation, then the card's answer.
@@ -129,13 +130,44 @@ Settings in **AI Grading...** (saved in `config/flashcards/config.json`, so they
 - **Keep playing after N s** (default 15, 0 = at once): when the Keep playing button appears.
 - **Play at least N s** (default 5): minimum time in the game before a graded card comes back.
 - **Play while thinking** (default OFF): go back to the game right away every time.
-- **Indicator layout...**: opens the HUD layout screen to move and resize the thinking animation shown while you play.
+- **HUD layout...**: move and resize the panel shown while you play (the thinking animation, then the AI's result).
+- **Auto-grade...**: what happens when the AI finishes while you're playing, see [Auto-grading](#auto-grading).
 - **AI prompt...**: read or rewrite the grading instructions, see [The AI prompt](#the-ai-prompt).
 - **Memory & performance...**: how much of your computer the AI may use, see [Memory and performance](#memory-and-performance).
 - The model list shows roughly how much RAM each model needs, green if it fits your AI memory budget.
 - **Adjusting score** (default OFF): when ON, a slider under the result lets you change the score if you disagree with the AI, which unlocks buttons accordingly.
 
 Small models sometimes misjudge, which is why Again is always available and score adjusting exists.
+
+### Auto-grading
+When the AI finishes grading while you're playing (with *Play while thinking*, or after *Keep playing*), the thinking animation turns into the result:
+
+- the grade and score (e.g. **GOOD 0.83**), in the grade's colour,
+- a countdown with a shrinking bar ("auto in 4s"),
+- the start of the AI's explanation, cut off with "..." after a set number of characters,
+- which key opens the card: **R** by default ("Open graded card", changeable in Minecraft's Controls under the Flashcards category).
+
+If you don't press the key before the countdown ends, the AI's grade is applied on its own: the best button the score unlocks (0.83 → Good with the default cut-offs) is sent to Anki, and the action bar says "Auto-graded Good (0.83)". Press the key instead and the card opens as usual, so you can read everything and pick the grade yourself. The countdown pauses while a menu is open.
+
+**Which grades are applied on their own** is up to you, for all decks and per deck. A grade that isn't on the list brings the card back on screen instead, as before (after the minimum play time), so you see what you missed:
+
+| Choice | Applied on their own | Card comes back for |
+|---|---|---|
+| Never | none | every grade |
+| Easy only | Easy | Good, Hard, Again |
+| **Good and Easy** (default) | Good, Easy | Hard, Again |
+| Hard and up | Hard, Good, Easy | Again |
+| Every grade | all, Again too | none |
+
+Settings in **AI Grading... → Auto-grade...**:
+- **Auto-grading** ON/OFF (default ON). OFF: a graded card always comes back for you to grade.
+- **Apply on their own**: the choice above, for decks that don't have their own.
+- **Countdown**: 1-30 seconds (default 5).
+- **Explanation on the HUD**: how many characters of the explanation to show before "..." (default 140).
+
+Per deck: **Deck Presets... → Auto-grade** (click to cycle; *Default* follows the main choice). For example, *Every grade* for an easy vocabulary deck, *Never* for a deck you want to review carefully.
+
+A card that the AI found too vague (second chance) or couldn't grade always comes back on screen, and the panel says so. The key opens it straight away there too.
 
 ### The AI prompt
 **AI Grading... → AI prompt** shows the full instructions the AI grades by, and lets you rewrite them. *Reset to built-in* brings the default back; while you haven't changed anything, you keep getting the improved default when the mod updates.
@@ -207,6 +239,7 @@ Flashcards config → **Deck Presets...** Pick a deck on the left and give it it
 - **Rewards**: its own rewards and penalties, from the same presets as the main ones, or *Same as main*.
 - **Time between cards**: click to switch from *Default* to *Own*, then type the minutes and seconds. E.g. every 2 minutes for a deck you're cramming, every 10 for one you only maintain.
 - **Card size**: its own limits for the answer area, pictures and card width, see [Card size and pictures](#card-size-and-pictures). The cog on a card of that deck sets the same thing.
+- **Auto-grade**: which AI grades are applied on their own for this deck when it's graded while you play, see [Auto-grading](#auto-grading).
 
 A blue dot marks decks that have a preset. How presets apply:
 - The preset of the deck the **card** is in is used, so when you study a parent deck, each subdeck's cards follow that subdeck's preset.
@@ -219,6 +252,7 @@ Score cut-offs, the second chance and the "keep playing" settings are shared by 
 ## Timer and study HUD
 A small panel shows:
 - the countdown to the next question with a progress bar (yellow in the last 10 seconds),
+- when a card is due but not showing yet, a **Waiting** line saying why: another menu is open ("close this menu"), you just took damage ("you were hurt · 7s"; cards wait 10 seconds after damage so they don't appear mid-fight), or the card is still coming from Anki,
 - how many cards you answered this session (correct ✔ / wrong ✘),
 - in Anki mode: cards reviewed today in Anki (all devices) and what's still **Due** in your deck as three numbers in Anki's own colours and order: blue = new, red = learning, green = to review (after Anki's daily limits).
 
@@ -233,7 +267,11 @@ Flashcards config → **General... → Card Keys...** Click a key button and pre
 | 1st to 4th grade button (Again, Hard, Good, Easy) | 1, 2, 3, 4 (the number pad always works too) |
 | Keep playing while the AI grades | Space (Esc always works too) |
 
-**Stray key protection.** A card can pop up while you're running and jumping, with Space and W held down. So when a card appears (also when it comes back after AI grading), the keyboard is ignored for a moment (default 1 second, adjustable from 0 to 5) *and* until you've let go of the movement, jump and card keys you were holding. A small "keys unlock in ..." note shows while that's happening; the mouse always works. After each step on a card (e.g. showing the answer) there's a much shorter pause, so one long key press can't count twice.
+**Stray key protection.** A card can pop up while you're running and jumping, with Space and W held down. So when a card appears (also when it comes back after AI grading), two delays apply, both adjustable on this screen:
+- **Card keys** (the keys in the table, plus Enter) wait **1 second**, so the Space you were jumping with can't flip or answer the card. A small "Space unlocks in ..." note shows meanwhile.
+- **Typing** waits only **0.2 seconds**, so you can start writing your answer straight away. A Space pressed into a still-empty answer box is ignored.
+
+In both cases a key you're still holding (movement, jump, a card key) has to be let go first, so it can't type letters or count as a press. The mouse always works. After each step on a card (e.g. showing the answer) there's only a very short pause on the card keys, so one long key press can't count twice.
 
 Other settings are in Flashcards config → **General...**:
 - **Question timer: Real time / Game time**

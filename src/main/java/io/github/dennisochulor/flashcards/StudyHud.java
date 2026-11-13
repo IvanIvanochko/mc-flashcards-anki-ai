@@ -13,6 +13,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.CommonColors;
+import net.minecraft.util.FormattedCharSequence;
 import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -67,10 +68,12 @@ public final class StudyHud {
         if (editingLayout || minecraft.player == null || minecraft.getDebugOverlay().showDebugScreen()) return;
         ModConfig config = FileManager.getConfig();
 
-        AnkiQuestionScreen grading = AnkiQuestionScreen.backgroundCard();
-        if (grading != null) {
-            drawIndicator(graphics, minecraft.font, config.indicatorPlacement(), grading.modelName(),
-                    grading.isGrading() ? grading.gradingElapsedMillis() : -1, grading.secondsUntilReturn());
+        AnkiQuestionScreen waiting = AnkiQuestionScreen.backgroundCard();
+        if (waiting != null) {
+            if (waiting.isGrading()) {
+                drawIndicator(graphics, minecraft.font, config.indicatorPlacement(), waiting.modelName(), waiting.gradingElapsedMillis(), 0);
+            }
+            else drawStatus(graphics, minecraft.font, config.indicatorPlacement(), waiting.modelName(), waiting.backgroundStatus());
         }
         if (config.hudEnabled()) drawStats(graphics, minecraft, config, config.hudPlacement());
     }
@@ -132,18 +135,22 @@ public final class StudyHud {
         QuestionScheduler.State state = QuestionScheduler.state();
         long seconds = state == QuestionScheduler.State.COUNTING ? (QuestionScheduler.remainingMillis() + 999) / 1000 : -1;
         boolean paused = minecraft.isPaused();
-        boolean grading = AnkiQuestionScreen.backgroundCard() != null;
+        AnkiQuestionScreen offScreen = AnkiQuestionScreen.backgroundCard();
+        boolean grading = offScreen != null && offScreen.isGrading();
+        boolean graded = offScreen != null && !offScreen.isGrading();
         StudyStats.AnkiStats anki = StudyStats.anki();
 
         long key = seconds;
         key = key * 31 + state.ordinal();
-        key = key * 31 + (paused ? 1 : 0) + (grading ? 2 : 0);
+        key = key * 31 + (paused ? 1 : 0) + (grading ? 2 : 0) + (graded ? 4 : 0);
         key = key * 31 + StudyStats.sessionCorrect();
         key = key * 31 + StudyStats.sessionWrong();
+        String waiting = QuestionScheduler.waitingReason(minecraft);
+        key = key * 31 + (waiting == null ? 0 : waiting.hashCode());
         Panel cached = panel;
         if (cached != null && key == panelKey && config == panelConfig && anki == panelAnki) return cached;
 
-        Panel built = build(minecraft.font, config, state, seconds, paused, grading, anki);
+        Panel built = build(minecraft.font, config, state, seconds, paused, grading, graded, anki, waiting);
         panel = built;
         panelKey = key;
         panelConfig = config;
@@ -152,7 +159,7 @@ public final class StudyHud {
     }
 
     private static Panel build(Font font, ModConfig config, QuestionScheduler.State state, long seconds, boolean paused,
-                               boolean grading, StudyStats.@Nullable AnkiStats anki) {
+                               boolean grading, boolean graded, StudyStats.@Nullable AnkiStats anki, @Nullable String waiting) {
         Component title;
         Component value;
         int accent;
@@ -181,9 +188,26 @@ public final class StudyHud {
                 accent = YELLOW;
             }
             case QUESTION -> {
-                title = Component.literal(grading ? "AI GRADING" : "CARD").withColor(GRAY);
-                value = Component.literal(grading ? "thinking" : "on screen").withColor(grading ? ThinkingAnimation.PURPLE : CommonColors.WHITE);
-                accent = grading ? ThinkingAnimation.PURPLE : BLUE;
+                if (grading) {
+                    title = Component.literal("AI GRADING").withColor(GRAY);
+                    value = Component.literal("thinking").withColor(ThinkingAnimation.PURPLE);
+                    accent = ThinkingAnimation.PURPLE;
+                }
+                else if (graded) { // the AI is done; the result is in the indicator panel
+                    title = Component.literal("CARD").withColor(GRAY);
+                    value = Component.literal("graded").withColor(GREEN);
+                    accent = GREEN;
+                }
+                else if (AnkiSession.isFetching()) { // due, but not on screen yet: say so instead of "on screen"
+                    title = Component.literal("NEXT CARD").withColor(GRAY);
+                    value = Component.literal("now").withColor(YELLOW);
+                    accent = YELLOW;
+                }
+                else {
+                    title = Component.literal("CARD").withColor(GRAY);
+                    value = Component.literal("on screen").withColor(CommonColors.WHITE);
+                    accent = BLUE;
+                }
             }
             default -> {
                 title = Component.literal("NEXT CARD").withColor(GRAY);
@@ -192,7 +216,9 @@ public final class StudyHud {
             }
         }
 
-        List<Row> rows = new ArrayList<>(3);
+        List<Row> rows = new ArrayList<>(4);
+        // a card that is due but not showing: say what it's waiting for
+        if (waiting != null) rows.add(new Row(Component.literal("Waiting").withColor(YELLOW), Component.literal(waiting).withColor(CommonColors.WHITE)));
         int total = StudyStats.sessionTotal();
         MutableComponent session = Component.literal(String.valueOf(total)).withColor(CommonColors.WHITE);
         if (total > 0) {
@@ -283,6 +309,63 @@ public final class StudyHud {
             graphics.text(font, "✔ ", x, y, GREEN, true);
             graphics.text(font, text, x + font.width("✔ "), y, CommonColors.WHITE, true);
         }
+        graphics.pose().popMatrix();
+    }
+
+    // ---------------------------------------------------------------- the AI's result, while playing
+
+    private static String wrappedText = "";
+    private static int wrappedWidth = -1;
+    private static List<FormattedCharSequence> wrappedLines = List.of();
+
+    /** Wraps the explanation once per text and width, not every frame. */
+    private static List<FormattedCharSequence> wrap(Font font, String text, int width) {
+        if (!text.equals(wrappedText) || width != wrappedWidth) {
+            wrappedText = text;
+            wrappedWidth = width;
+            wrappedLines = text.isEmpty() ? List.of() : font.split(Component.literal(text), width);
+        }
+        return wrappedLines;
+    }
+
+    /**
+     * The AI's result for a card that's off screen, in the indicator's place: the grade and score, what happens next
+     * ("auto in 4s" with a shrinking bar, or "back in 3s"), the start of the AI's explanation, and which key opens the card.
+     */
+    public static void drawStatus(GuiGraphicsExtractor graphics, Font font, ModConfig.Placement placement, String model,
+                                  AnkiQuestionScreen.BackgroundStatus status) {
+        int innerWidth = ThinkingAnimation.width(font, model); // same width as the thinking animation, so the panel doesn't jump
+        List<FormattedCharSequence> lines = wrap(font, status.text(), innerWidth);
+        boolean bar = status.progress() >= 0;
+        int width = ACCENT_WIDTH + PAD + innerWidth + PAD;
+        int height = PAD + font.lineHeight + (bar ? 5 : 2) + lines.size() * font.lineHeight
+                + (status.hint().isEmpty() ? 0 : 3 + font.lineHeight) + PAD - 1;
+
+        float scale = placement.scale().floatValue();
+        int left = placement.left(graphics.guiWidth(), width);
+        int top = placement.top(graphics.guiHeight(), height);
+        graphics.pose().pushMatrix();
+        graphics.pose().translate(left, top);
+        graphics.pose().scale(scale, scale);
+        drawPanelBackground(graphics, width, height, status.color());
+
+        int x = ACCENT_WIDTH + PAD;
+        int right = width - PAD;
+        int y = PAD;
+        graphics.text(font, status.title(), x, y, status.color(), true);
+        graphics.text(font, status.right(), right - font.width(status.right()), y, GRAY, true);
+        y += font.lineHeight + 1;
+        if (bar) { // the time left before the grade is applied
+            graphics.fill(x, y, right, y + 2, BAR_TRACK);
+            graphics.fill(x, y, x + Math.round((right - x) * Math.min(1, status.progress())), y + 2, status.color());
+            y += 4;
+        }
+        else y += 1;
+        for (FormattedCharSequence line : lines) {
+            graphics.text(font, line, x, y, CommonColors.WHITE, true);
+            y += font.lineHeight;
+        }
+        if (!status.hint().isEmpty()) graphics.text(font, status.hint(), x, y + 3, DIM, true);
         graphics.pose().popMatrix();
     }
 }

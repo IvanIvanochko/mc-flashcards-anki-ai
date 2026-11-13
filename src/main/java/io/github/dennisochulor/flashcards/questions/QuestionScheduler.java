@@ -41,7 +41,13 @@ public class QuestionScheduler {
 
     private static final List<Question> questions = new ArrayList<>();
     private static ModConfig config = FileManager.getConfig();
-    public static long playerLastHurtTime = 0L;
+    /** A card doesn't pop up in the middle of a fight: it waits this long after the player last took damage. */
+    private static final long HURT_QUIET_MILLIS = 10_000;
+    /**
+     * When the player last took damage, on the real clock. (It used to be a game-time stamp, which broke when changing
+     * worlds: against a world with a lower clock it read as "hurt just now" for ever, and no card would open.)
+     */
+    private static long lastHurtMillis = Long.MIN_VALUE / 2;
 
     private static State state = State.OFF;
     private static long deadlineNanos;   // REAL_TIME
@@ -165,8 +171,12 @@ public class QuestionScheduler {
     public static boolean promptQuestion() {
         Objects.requireNonNull(Minecraft.getInstance().player); // sanity check to avoid questions outside a world
 
-        if (AnkiQuestionScreen.backgroundCard() != null) { // a card is still being graded while the player plays
-            Minecraft.getInstance().player.sendOverlayMessage(net.minecraft.network.chat.Component.literal("The AI is still grading your last answer"));
+        AnkiQuestionScreen waiting = AnkiQuestionScreen.backgroundCard();
+        if (waiting != null) { // the last card isn't finished yet: it's being graded, or its grade is waiting on the HUD
+            String key = io.github.dennisochulor.flashcards.Flashcards.openCardKeyName();
+            String message = waiting.isGrading() ? "The AI is still grading your last answer"
+                    : key == null ? "Your last card is still waiting on the HUD" : "Your last card is waiting: press " + key + " to open it";
+            Minecraft.getInstance().player.sendOverlayMessage(net.minecraft.network.chat.Component.literal(message));
             return true;
         }
 
@@ -184,9 +194,31 @@ public class QuestionScheduler {
         return true;
     }
 
+    /** Call every tick the player is taking damage. */
+    public static void markPlayerHurt() {
+        lastHurtMillis = System.currentTimeMillis();
+    }
+
     public static boolean wasPlayerHurtRecently() {
-        ClientLevel level = Minecraft.getInstance().level;
-        if (level == null) return false;
-        return (level.getGameTime() - playerLastHurtTime) < (level.tickRateManager().tickrate() * 10); // 10 seconds
+        return hurtSecondsLeft() > 0;
+    }
+
+    /** @return how many seconds are left of the quiet time after taking damage, 0 if none */
+    public static int hurtSecondsLeft() {
+        long left = HURT_QUIET_MILLIS - (System.currentTimeMillis() - lastHurtMillis);
+        return left <= 0 ? 0 : (int) ((left + 999) / 1000);
+    }
+
+    /**
+     * Why a card that is due hasn't appeared yet, in a few words for the HUD, or null if nothing is holding it up
+     * (or no card is due). Cards wait for other menus to close and for a quiet moment after taking damage.
+     */
+    public static @Nullable String waitingReason(Minecraft minecraft) {
+        boolean fetching = AnkiSession.isFetching();
+        if (state != State.DUE && !(state == State.QUESTION && fetching)) return null;
+        if (minecraft.gui.screen() != null) return "close this menu";
+        int hurt = hurtSecondsLeft();
+        if (hurt > 0) return "you were hurt · " + hurt + "s";
+        return fetching ? "getting it from Anki" : null;
     }
 }

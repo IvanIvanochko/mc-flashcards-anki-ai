@@ -2,6 +2,7 @@ package io.github.dennisochulor.flashcards.questions;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import io.github.dennisochulor.flashcards.FileManager;
+import io.github.dennisochulor.flashcards.Flashcards;
 import io.github.dennisochulor.flashcards.IntSlider;
 import io.github.dennisochulor.flashcards.ScoreSlider;
 import io.github.dennisochulor.flashcards.ai.AiGrader;
@@ -136,11 +137,18 @@ public class AnkiQuestionScreen extends Screen {
     private int thinkingY = 0;
     private boolean quitShown = false;
     private final ModConfig.CardKeys keys = FileManager.getConfig().cardKeys();
-    /** The keyboard is ignored while this is true, see {@link #inputReady}. */
-    private boolean inputLocked = true;
+    /** While true, the card's own keys (Space, Enter, the grade keys, Keep playing) are ignored, see {@link #updateInputLocks}. */
+    private boolean actionLocked = true;
+    /** While true, every other key (typing, scrolling) is ignored. Lifts much sooner than {@link #actionLocked}. */
+    private boolean typingLocked = true;
     private long inputLockedAtMillis = System.currentTimeMillis();
-    private long inputGraceMillis = keys.graceMillis();
+    private long actionGraceMillis = keys.graceMillis();
+    private long typingGraceMillis = keys.typingGraceMillis();
     private long backgroundSinceMillis = 0;
+    /** True while this card's grade is waiting on the HUD to be applied on its own (see {@link #tickBackground}). */
+    private boolean autoPending = false;
+    private long autoRemainingMillis = 0;
+    private long lastBackgroundTickMillis = 0;
 
     public AnkiQuestionScreen(AnkiCard card) {
         super(Component.literal("Anki card"));
@@ -307,47 +315,80 @@ public class AnkiQuestionScreen extends Screen {
     // ---------------------------------------------------------------- stray key protection
 
     /**
-     * Ignore the keyboard for a while. Called when a card appears (full grace period: the player may be mid-jump,
-     * hammering Space) and when the card changes state (short: a key held from the last press mustn't count twice).
+     * Ignore the keyboard for a while. A card can appear while the player is sprinting and jumping, with W held and
+     * Space being hammered, so:
+     * <ul>
+     * <li>the card's own keys (Space, Enter, the grade keys...) wait the full grace period, because one stray press
+     * would flip or answer the card;</li>
+     * <li>everything else (typing an answer) only waits a moment, so the player can start writing straight away.</li>
+     * </ul>
+     * When the card merely changes state (e.g. the answer was just shown), only a short pause on the card's keys is
+     * needed, so that the key press that caused the change can't count twice.
      */
     private void lockInput(boolean cardJustAppeared) {
-        inputLocked = true;
+        actionLocked = true;
+        typingLocked = cardJustAppeared;
         inputLockedAtMillis = System.currentTimeMillis();
-        inputGraceMillis = cardJustAppeared ? keys.graceMillis() : Math.min(keys.graceMillis(), 300);
+        actionGraceMillis = cardJustAppeared ? keys.graceMillis() : Math.min(keys.graceMillis(), 300);
+        typingGraceMillis = cardJustAppeared ? keys.typingGraceMillis() : 0;
     }
 
-    private long inputLockRemainingMillis() {
-        return inputLocked ? Math.max(0, inputGraceMillis - (System.currentTimeMillis() - inputLockedAtMillis)) : 0;
+    /** @return how long the card's own keys stay ignored, 0 once the grace period is over */
+    private long actionLockRemainingMillis() {
+        return actionLocked ? Math.max(0, actionGraceMillis - (System.currentTimeMillis() - inputLockedAtMillis)) : 0;
     }
 
     /**
-     * @return whether key presses count yet: the grace period is over AND none of the keys the player was likely
-     * holding (movement, jump, the card keys) is still down. The second part matters because a held key keeps
-     * sending presses: without it, W held from walking would type "wwww" and Space would answer the card.
+     * Lifts the locks when their time is up AND the keys the player was holding have been let go (a held key keeps
+     * sending presses: W held from walking would type "wwww", a held Space would answer the card).
+     * <p>
+     * Called every frame, never from a key press: while a key press is being handled that key is of course down, so
+     * checking "is a card key down?" there could never come out false, and the keyboard would stay dead.
      */
-    private boolean inputReady() {
-        if (!inputLocked) return true;
-        if (inputLockRemainingMillis() > 0 || anyWatchedKeyDown()) return false;
-        inputLocked = false;
-        return true;
+    private void updateInputLocks() {
+        if (!actionLocked && !typingLocked) return;
+        long elapsed = System.currentTimeMillis() - inputLockedAtMillis;
+        var options = Minecraft.getInstance().options;
+        if (typingLocked && elapsed >= typingGraceMillis
+                && !anyDown(options.keyUp, options.keyDown, options.keyLeft, options.keyRight, options.keyJump)) {
+            typingLocked = false;
+        }
+        if (actionLocked && elapsed >= actionGraceMillis && !anyCardKeyDown() && !anyDown(options.keyJump)) {
+            actionLocked = false;
+        }
     }
 
-    private boolean anyWatchedKeyDown() {
+    private boolean anyCardKeyDown() {
         int[] cardKeys = {keys.confirm(), keys.again(), keys.hard(), keys.good(), keys.easy(), keys.keepPlaying(),
                 InputConstants.KEY_RETURN, InputConstants.KEY_NUMPADENTER};
         for (int key : cardKeys) if (InputConstants.isKeyDown(key)) return true;
-        var options = Minecraft.getInstance().options;
-        KeyMapping[] movement = {options.keyUp, options.keyDown, options.keyLeft, options.keyRight, options.keyJump, options.keyShift, options.keySprint};
-        for (KeyMapping mapping : movement) {
+        return false;
+    }
+
+    /** @return whether any of these game controls is physically held down right now (keyboard keys only) */
+    private static boolean anyDown(KeyMapping... mappings) {
+        for (KeyMapping mapping : mappings) {
             InputConstants.Key bound = KeyMappingHelper.getBoundKeyOf(mapping);
             if (bound.getType() == InputConstants.Type.KEYBOARD && InputConstants.isKeyDown(bound.getValue())) return true;
         }
         return false;
     }
 
+    /** Keys that do something to the card, as opposed to typing or scrolling. */
+    private boolean isCardKey(int key) {
+        if (key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER) return true; // Enter: confirm / check
+        if (isTyping()) return false; // while typing, Space and the digits are just characters
+        return key == keys.confirm() || key == keys.keepPlaying() || key == InputConstants.KEY_ESCAPE
+                || key == keys.again() || key == keys.hard() || key == keys.good() || key == keys.easy()
+                || key == InputConstants.KEY_NUMPAD1 || key == InputConstants.KEY_NUMPAD2
+                || key == InputConstants.KEY_NUMPAD3 || key == InputConstants.KEY_NUMPAD4;
+    }
+
     @Override
     public boolean charTyped(CharacterEvent event) {
-        if (!inputReady()) return true; // swallow letters from keys held since before the card appeared
+        if (typingLocked) return true; // letters from keys held since before the card appeared
+        // a jumping player's Space shouldn't fill an empty answer with blanks
+        if (isTyping() && event.codepoint() == ' ' && answerBox.getValue().isEmpty()) return true;
         return super.charTyped(event);
     }
 
@@ -727,9 +768,11 @@ public class AnkiQuestionScreen extends Screen {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
         if (phase == Phase.GRADING) extractThinking(graphics);
 
-        long lockLeft = inputLockRemainingMillis();
-        if (lockLeft > 150) { // tell the player why the keyboard isn't responding yet (the mouse always works)
-            String hint = "keys unlock in " + String.format(Locale.ROOT, "%.1f", lockLeft / 1000.0) + "s";
+        updateInputLocks();
+        long lockLeft = actionLockRemainingMillis();
+        if (lockLeft > 150) { // tell the player why a key isn't responding yet (typing and the mouse already work)
+            String lockedKey = isTyping() ? "Enter" : keyName(keys.confirm());
+            String hint = lockedKey + " unlocks in " + String.format(Locale.ROOT, "%.1f", lockLeft / 1000.0) + "s";
             graphics.text(Minecraft.getInstance().font, hint, questionView.getRight() - 22 - Minecraft.getInstance().font.width(hint),
                     (HEADER_HEIGHT - 9) / 2, 0xFF777C88, false);
         }
@@ -811,11 +854,126 @@ public class AnkiQuestionScreen extends Screen {
         return left <= 0 ? 0 : (int) ((left + 999) / 1000);
     }
 
-    /** Call every client tick: reopens a card graded in the background, once the player isn't busy (same rules as new questions). */
-    public static void tickBackground(Minecraft minecraft) {
+    // ---------------------------------------------------------------- auto-grading
+
+    /** The grade the AI's score gives, as the 4-button ease (1 = Again ... 4 = Easy), and the button that stands for it. */
+    private int suggestedEase4() {
+        return nameToEase4(gradeNames.get(suggestedIndex()));
+    }
+
+    /**
+     * The AI finished while the player was playing. If auto-grading is on and this grade is one the deck lets through,
+     * the result goes on the HUD with a countdown instead of the card coming back.
+     */
+    private void startAutoGradeIfAllowed() {
+        ModConfig.AutoGrading auto = ai.autoGrading();
+        if (!auto.enabled() || !settings.autoGradeFrom().applies(suggestedEase4())) return;
+        autoPending = true;
+        autoRemainingMillis = auto.seconds() * 1000L;
+        lastBackgroundTickMillis = System.currentTimeMillis();
+    }
+
+    /** Applies the AI's grade without opening the card, and tells the player what happened. */
+    private void applyAutoGrade() {
+        autoPending = false;
+        int index = suggestedIndex();
+        int ease = gradeEases.get(index);
+        String name = gradeNames.get(index);
+        if (!submit(ease)) return;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player != null) {
+            minecraft.player.sendOverlayMessage(Component.literal("Auto-graded ").withColor(GRAY)
+                    .append(Component.literal(name).withColor(buttonColor(name)))
+                    .append(Component.literal("  (" + format(score) + ")").withColor(GRAY)));
+        }
+        AnswerOutcome.runCommands(ease != AGAIN, card.deckName());
+    }
+
+    /** What the HUD shows for a card that is waiting off screen. */
+    public record BackgroundStatus(String title, int color, String right, String text, String hint, float progress) {}
+
+    /** @return what to show on the HUD for this card while it's off screen (it's no longer "thinking") */
+    public BackgroundStatus backgroundStatus() {
+        String key = Flashcards.openCardKeyName();
+        String openHint = key == null ? "Open the card: set a key in Controls" : key + ": open the card";
+        if (phase == Phase.GRADED && aiGrade != null) {
+            String name = gradeNames.get(suggestedIndex());
+            String title = name.toUpperCase(Locale.ROOT) + "  " + format(score);
+            String text = shorten(aiGrade.feedback(), ai.autoGrading().textChars());
+            if (autoPending) {
+                long total = ai.autoGrading().seconds() * 1000L;
+                long seconds = (autoRemainingMillis + 999) / 1000;
+                boolean paused = Minecraft.getInstance().gui.screen() != null;
+                return new BackgroundStatus(title, buttonColor(name), paused ? "waiting" : "auto in " + seconds + "s", text,
+                        key == null ? "Not applied yet: set a key in Controls to open it" : key + ": open the card and grade it yourself",
+                        total <= 0 ? 0 : autoRemainingMillis / (float) total);
+            }
+            int back = secondsUntilReturn();
+            return new BackgroundStatus(title, buttonColor(name), back > 0 ? "back in " + back + "s" : "coming back", text,
+                    key == null ? "" : key + ": open it now", -1);
+        }
+        if (phase == Phase.SECOND_CHANCE) {
+            return new BackgroundStatus("TOO VAGUE", CommonColors.SOFT_YELLOW, secondsUntilReturn() > 0 ? "back in " + secondsUntilReturn() + "s" : "coming back",
+                    shorten(secondChanceHint, ai.autoGrading().textChars()), key == null ? "" : key + ": try again now", -1);
+        }
+        return new BackgroundStatus("COULDN'T GRADE", CommonColors.SOFT_RED, secondsUntilReturn() > 0 ? "back in " + secondsUntilReturn() + "s" : "coming back",
+                shorten(gradeError, ai.autoGrading().textChars()), key == null ? "" : openHint, -1);
+    }
+
+    /** Cuts a text to {@code max} characters, at a word break where possible, and ends it with "...". */
+    private static String shorten(String text, int max) {
+        String oneLine = text.replace('§', '$').replaceAll("\\s+", " ").strip();
+        if (oneLine.length() <= max) return oneLine;
+        int cut = oneLine.lastIndexOf(' ', max);
+        return (cut > max / 2 ? oneLine.substring(0, cut) : oneLine.substring(0, max)).stripTrailing() + "...";
+    }
+
+    /**
+     * Call every client tick. For a card waiting off screen:
+     * <ul>
+     * <li>the "open card" key brings it on screen straight away;</li>
+     * <li>a grade waiting to be applied counts down (only while no menu is open) and is then applied;</li>
+     * <li>otherwise the card comes back once graded, after the minimum play time, when the player is free
+     * (same rules as new questions).</li>
+     * </ul>
+     * @param openKeyPressed whether the player pressed the "open card" key since the last tick
+     */
+    public static void tickBackground(Minecraft minecraft, boolean openKeyPressed) {
         AnkiQuestionScreen screen = background;
-        if (screen == null || screen.phase == Phase.GRADING || screen.secondsUntilReturn() > 0) return;
-        if (minecraft.player == null || minecraft.gui.screen() != null || QuestionScheduler.wasPlayerHurtRecently()) return;
+        if (screen == null) {
+            if (openKeyPressed && minecraft.player != null) {
+                minecraft.player.sendOverlayMessage(Component.literal("No graded card is waiting").withColor(GRAY));
+            }
+            return;
+        }
+        if (minecraft.player == null) return;
+
+        if (openKeyPressed && screen.phase != Phase.GRADING && minecraft.gui.screen() == null) {
+            screen.autoPending = false; // the player wants to grade it themselves
+            reopen(minecraft, screen);
+            return;
+        }
+        if (openKeyPressed && screen.phase == Phase.GRADING) {
+            minecraft.player.sendOverlayMessage(Component.literal("The AI is still grading this card").withColor(GRAY));
+        }
+
+        if (screen.autoPending) {
+            long now = System.currentTimeMillis();
+            if (minecraft.gui.screen() == null) screen.autoRemainingMillis -= now - screen.lastBackgroundTickMillis; // paused while a menu is open
+            screen.lastBackgroundTickMillis = now;
+            if (screen.autoRemainingMillis <= 0) {
+                background = null;
+                screen.applyAutoGrade();
+            }
+            return;
+        }
+
+        if (screen.phase == Phase.GRADING || screen.secondsUntilReturn() > 0) return;
+        if (minecraft.gui.screen() != null || QuestionScheduler.wasPlayerHurtRecently()) return;
+        reopen(minecraft, screen);
+    }
+
+    private static void reopen(Minecraft minecraft, AnkiQuestionScreen screen) {
         background = null;
         screen.lockInput(true); // the player is in the middle of playing: same protection as a new card
         minecraft.gui.setScreen(screen);
@@ -867,6 +1025,7 @@ public class AnkiQuestionScreen extends Screen {
             aiGrade = grade;
             score = grade.score();
             setPhase(Phase.GRADED);
+            if (background == this) startAutoGradeIfAllowed(); // graded while the player plays
         }, error -> {
             if (phase != Phase.GRADING) return;
             gradeError = error;
@@ -890,16 +1049,23 @@ public class AnkiQuestionScreen extends Screen {
     }
 
     private void grade(int ease) {
-        int index = gradeEases.indexOf(ease);
-        if (answered || index < 0 || !isUnlocked(index)) return;
-        answered = true;
-        boolean correct = ease != AGAIN;
-
-        AnkiSession.answer(card, ease);
-        AnswerOutcome.playSoundAndRecordStats(correct);
-        QuestionScheduler.schedule(card.deckName()); // this deck's own time until the next question, if it has one
+        if (!submit(ease)) return;
         this.onClose();
-        AnswerOutcome.runCommands(correct, card.deckName());
+        AnswerOutcome.runCommands(ease != AGAIN, card.deckName());
+    }
+
+    /**
+     * Sends the grade to Anki and records it. Doesn't touch the screen, so it also works for a card that's only on the HUD.
+     * @return false if the grade isn't allowed (locked button) or the card was already answered
+     */
+    private boolean submit(int ease) {
+        int index = gradeEases.indexOf(ease);
+        if (answered || index < 0 || !isUnlocked(index)) return false;
+        answered = true;
+        AnkiSession.answer(card, ease);
+        AnswerOutcome.playSoundAndRecordStats(ease != AGAIN);
+        QuestionScheduler.schedule(card.deckName()); // this deck's own time until the next question, if it has one
+        return true;
     }
 
     @Override
@@ -917,9 +1083,10 @@ public class AnkiQuestionScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent event) {
-        if (!inputReady()) return true; // a card just appeared (or changed): stray keys don't count yet
-
         int key = event.key();
+        // a card just appeared (or changed): stray keys don't count yet. The card's own keys wait longer than typing.
+        if (isCardKey(key) ? actionLocked : typingLocked) return true;
+
         boolean typing = isTyping();
         // Enter always confirms; the configurable key (Space by default) too, except while typing, where it's a letter
         boolean confirm = key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER

@@ -76,7 +76,7 @@ class AiGradingConfigScreen extends Screen {
                     "OFF: you wait on the card, and \"Keep playing\" appears if it takes too long.")))
             .create(0, 0, WIDGET_WIDTH / 2 - 2, 20, Component.literal("Play while thinking"));
 
-    private final Button indicatorButton = Button.builder(Component.literal("Indicator layout..."), _ -> Minecraft.getInstance().gui.setScreen(new HudLayoutScreen()))
+    private final Button indicatorButton = Button.builder(Component.literal("HUD layout..."), _ -> Minecraft.getInstance().gui.setScreen(new HudLayoutScreen()))
             .tooltip(Tooltip.create(Component.literal("Move and resize the \"AI is thinking\" animation that shows while you keep playing.")))
             .size(WIDGET_WIDTH / 2 - 2, 20).build();
 
@@ -86,6 +86,12 @@ class AiGradingConfigScreen extends Screen {
             .tooltip(Tooltip.create(Component.literal(
                     "Read or rewrite the whole set of instructions the AI grades by (there's a reset button).\n"
                     + "To tune grading for one deck you usually don't need this: give the deck a few notes in main config → Deck Presets...")))
+            .build();
+
+    private final Button autoGradingButton = Button.builder(Component.empty(), _ -> Minecraft.getInstance().gui.setScreen(new AutoGradingScreen()))
+            .tooltip(Tooltip.create(Component.literal(
+                    "When the AI finishes while you play, its grade shows on the HUD with a countdown, then is applied on its own "
+                    + "unless you open the card. Choose which grades, how long, and how much text.")))
             .build();
 
     private final Button performanceButton = Button.builder(Component.literal("Memory & performance..."), _ -> {
@@ -283,7 +289,10 @@ class AiGradingConfigScreen extends Screen {
         y += 24;
         autoKeepPlayingButton.setRectangle(columnWidth, 20, rightX, y);
         y += 24;
-        indicatorButton.setRectangle(columnWidth, 20, rightX, y);
+        int halfColumn = (columnWidth - 4) / 2;
+        indicatorButton.setRectangle(halfColumn, 20, rightX, y);
+        autoGradingButton.setMessage(Component.literal("Auto-grade: " + (FileManager.getConfig().aiGrading().autoGrading().enabled() ? "ON" : "OFF") + "..."));
+        autoGradingButton.setRectangle(columnWidth - halfColumn - 4, 20, rightX + halfColumn + 4, y);
         y += 24;
         promptButton.setMessage(Component.literal("AI prompt: " + (FileManager.getConfig().aiGrading().prompt().isBlank() ? "Default" : "Own") + "..."));
         promptButton.setRectangle(columnWidth, 20, rightX, y);
@@ -310,6 +319,7 @@ class AiGradingConfigScreen extends Screen {
         addRenderableWidget(indicatorButton);
         addRenderableWidget(promptButton);
         addRenderableWidget(performanceButton);
+        addRenderableWidget(autoGradingButton);
         if (roomForHelp) addRenderableWidget(helpText);
         addRenderableWidget(doneButton);
     }
@@ -328,7 +338,8 @@ class AiGradingConfigScreen extends Screen {
                 hardSlider.score(), goodSlider.score(), easySlider.score(), adjustButton.getValue(),
                 quitAfterSlider.intValue(), minPlaySlider.intValue(), autoKeepPlayingButton.getValue(),
                 FileManager.getConfig().aiGrading().prompt(),        // saved by its own editor
-                FileManager.getConfig().aiGrading().performance());  // saved by its own screen
+                FileManager.getConfig().aiGrading().performance(),   // saved by its own screen
+                FileManager.getConfig().aiGrading().autoGrading());  // saved by its own screen
         FileManager.updateConfig(FileManager.getConfig().withAiGrading(newAi)); // written to config/flashcards, so it survives restarts
         Minecraft.getInstance().gui.setScreen(parent);
     }

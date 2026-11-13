@@ -27,6 +27,12 @@ public class Flashcards implements ClientModInitializer {
     public static final String MOD_ID = "flashcards";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
     @Nullable private static KeyMapping promptKey = null;
+    @Nullable private static KeyMapping openCardKey = null;
+
+    /** @return the key bound to "Open graded card", or null if it's unbound */
+    public static @Nullable String openCardKeyName() {
+        return openCardKey == null || openCardKey.isUnbound() ? null : openCardKey.getTranslatedKeyMessage().getString();
+    }
 
     /** @return the key bound to "Prompt a question", or null if it's unbound */
     public static @Nullable Component promptKeyName() {
@@ -50,9 +56,11 @@ public class Flashcards implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(minecraft -> {
             if (minecraft.player == null || minecraft.level == null) return;
-            if (minecraft.player.hurtTime != 0) QuestionScheduler.playerLastHurtTime = minecraft.level.getGameTime();
+            if (minecraft.player.hurtTime != 0) QuestionScheduler.markPlayerHurt();
             QuestionScheduler.tick(minecraft);
-            AnkiQuestionScreen.tickBackground(minecraft);
+            boolean openPressed = false;
+            while (openCardKey != null && openCardKey.consumeClick()) openPressed = true;
+            AnkiQuestionScreen.tickBackground(minecraft, openPressed);
         });
         // attached to the scoreboard so it follows the same rules, e.g. hidden with F1
         HudElementRegistry.attachElementBefore(VanillaHudElements.SCOREBOARD, Identifier.fromNamespaceAndPath(MOD_ID, "study_hud"), StudyHud::extract);
@@ -71,6 +79,13 @@ public class Flashcards implements ClientModInitializer {
                 "Flashcards Config Menu",
                 InputConstants.Type.KEYBOARD,
                 InputConstants.KEY_H,
+                keyBindingCategory
+        ));
+
+        openCardKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+                "Open graded card (before it's auto-graded)",
+                InputConstants.Type.KEYBOARD,
+                InputConstants.KEY_R,
                 keyBindingCategory
         ));
 

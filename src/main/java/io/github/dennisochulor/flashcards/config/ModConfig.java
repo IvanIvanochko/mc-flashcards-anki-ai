@@ -52,17 +52,18 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
      * @param autoKeepPlaying   go back to the game as soon as the AI starts thinking, without pressing "Keep playing"
      * @param prompt            the player's own grading instructions; "" = the built-in default (which then keeps improving with updates)
      * @param performance       how much of the computer the AI may use
+     * @param autoGrading       what happens when the AI finishes grading while the player is playing
      */
     public record AiGrading(Boolean enabled, String ollamaUrl, String model,
                             Double hardFrom, Double goodFrom, Double easyFrom, Boolean adjustScore,
                             Integer quitAfterSeconds, Integer minPlaySeconds, Boolean autoKeepPlaying, String prompt,
-                            AiPerformance performance) {
+                            AiPerformance performance, AutoGrading autoGrading) {
         public static final double DEFAULT_HARD_FROM = 0.5, DEFAULT_GOOD_FROM = 0.7, DEFAULT_EASY_FROM = 0.9;
         public static final int DEFAULT_QUIT_AFTER_SECONDS = 15, MAX_QUIT_AFTER_SECONDS = 120;
         public static final int DEFAULT_MIN_PLAY_SECONDS = 5, MAX_MIN_PLAY_SECONDS = 120;
         public static final AiGrading DEFAULT = new AiGrading(false, DEFAULT_OLLAMA_URL, "",
                 DEFAULT_HARD_FROM, DEFAULT_GOOD_FROM, DEFAULT_EASY_FROM, false,
-                DEFAULT_QUIT_AFTER_SECONDS, DEFAULT_MIN_PLAY_SECONDS, false, "", null);
+                DEFAULT_QUIT_AFTER_SECONDS, DEFAULT_MIN_PLAY_SECONDS, false, "", null, null);
 
         @SuppressWarnings("ConstantValue")
         public AiGrading {
@@ -81,6 +82,7 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
             if (autoKeepPlaying == null) autoKeepPlaying = false;
             if (prompt == null) prompt = "";
             if (performance == null) performance = AiPerformance.recommended();
+            if (autoGrading == null) autoGrading = AutoGrading.DEFAULT;
             hardFrom = clamp01(hardFrom);
             goodFrom = Math.max(hardFrom, clamp01(goodFrom)); // keep Hard <= Good <= Easy
             easyFrom = Math.max(goodFrom, clamp01(easyFrom));
@@ -91,15 +93,19 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
         }
 
         public AiGrading withModel(String model) {
-            return new AiGrading(enabled, ollamaUrl, model, hardFrom, goodFrom, easyFrom, adjustScore, quitAfterSeconds, minPlaySeconds, autoKeepPlaying, prompt, performance);
+            return new AiGrading(enabled, ollamaUrl, model, hardFrom, goodFrom, easyFrom, adjustScore, quitAfterSeconds, minPlaySeconds, autoKeepPlaying, prompt, performance, autoGrading);
         }
 
         public AiGrading withPrompt(String prompt) {
-            return new AiGrading(enabled, ollamaUrl, model, hardFrom, goodFrom, easyFrom, adjustScore, quitAfterSeconds, minPlaySeconds, autoKeepPlaying, prompt, performance);
+            return new AiGrading(enabled, ollamaUrl, model, hardFrom, goodFrom, easyFrom, adjustScore, quitAfterSeconds, minPlaySeconds, autoKeepPlaying, prompt, performance, autoGrading);
+        }
+
+        public AiGrading withAutoGrading(AutoGrading autoGrading) {
+            return new AiGrading(enabled, ollamaUrl, model, hardFrom, goodFrom, easyFrom, adjustScore, quitAfterSeconds, minPlaySeconds, autoKeepPlaying, prompt, performance, autoGrading);
         }
 
         public AiGrading withPerformance(AiPerformance performance) {
-            return new AiGrading(enabled, ollamaUrl, model, hardFrom, goodFrom, easyFrom, adjustScore, quitAfterSeconds, minPlaySeconds, autoKeepPlaying, prompt, performance);
+            return new AiGrading(enabled, ollamaUrl, model, hardFrom, goodFrom, easyFrom, adjustScore, quitAfterSeconds, minPlaySeconds, autoKeepPlaying, prompt, performance, autoGrading);
         }
 
         /** @return the lowest score that unlocks the button for this Anki ease (1 = Again ... 4 = Easy) */
@@ -110,6 +116,62 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
                 case 3 -> goodFrom;
                 default -> easyFrom;
             };
+        }
+    }
+
+    /**
+     * Which AI grades are applied on their own when a card was graded while the player was playing.
+     * The others bring the card back on screen for the player to grade, as before.
+     */
+    public enum AutoGradeFrom {
+        NEVER("Never", "Always bring the card back, whatever the grade."),
+        EASY("Easy only", "Apply Easy on its own; bring the card back for Good, Hard and Again."),
+        GOOD("Good and Easy", "Apply Good and Easy on their own; bring the card back for Hard and Again, so you see what you missed."),
+        HARD("Hard and up", "Apply Hard, Good and Easy on their own; bring the card back only for Again."),
+        ALL("Every grade", "Apply every grade on its own, Again too. You never have to look at the card again unless you press the key.");
+
+        public final String friendlyName;
+        public final String description;
+
+        AutoGradeFrom(String friendlyName, String description) {
+            this.friendlyName = friendlyName;
+            this.description = description;
+        }
+
+        /** @param ease4 the grade as in Anki's 4-button layout: 1 = Again ... 4 = Easy */
+        public boolean applies(int ease4) {
+            return switch (this) {
+                case NEVER -> false;
+                case EASY -> ease4 >= 4;
+                case GOOD -> ease4 >= 3;
+                case HARD -> ease4 >= 2;
+                case ALL -> true;
+            };
+        }
+    }
+
+    /**
+     * When the AI finishes grading a card while the player is playing (after "Keep playing", or with "Play while
+     * thinking"), its result is shown on the HUD with a countdown. If the player doesn't open the card in time, the
+     * grade is applied on its own, provided it's one of the grades {@code from} allows.
+     *
+     * @param enabled   auto-grading on or off
+     * @param seconds   how long the result stays on the HUD before the grade is applied
+     * @param from      which grades may be applied on their own (decks can set their own)
+     * @param textChars how much of the AI's explanation the HUD shows before cutting it off with "..."
+     */
+    public record AutoGrading(Boolean enabled, Integer seconds, AutoGradeFrom from, Integer textChars) {
+        public static final int MAX_SECONDS = 30, MIN_TEXT = 40, MAX_TEXT = 400;
+        public static final AutoGrading DEFAULT = new AutoGrading(true, 5, AutoGradeFrom.GOOD, 140);
+
+        @SuppressWarnings("ConstantValue")
+        public AutoGrading {
+            if (enabled == null) enabled = true;
+            if (seconds == null) seconds = 5;
+            seconds = Math.max(1, Math.min(MAX_SECONDS, seconds));
+            if (from == null) from = AutoGradeFrom.GOOD;
+            if (textChars == null) textChars = 140;
+            textChars = Math.max(MIN_TEXT, Math.min(MAX_TEXT, textChars));
         }
     }
 
@@ -170,17 +232,21 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
     }
 
     /**
-     * Keys on the card screen (keyboard key codes), and how long keys are ignored when a card appears,
+     * Keys on the card screen (keyboard key codes), and how long the keyboard is ignored when a card appears,
      * so mashing Space while running and jumping can't skip a card unseen.
      *
-     * @param confirm     show the answer; then pick the suggested grade. Enter always does this too.
-     * @param keepPlaying leave a card that's being graded and keep playing
-     * @param graceMillis keys are ignored for this long after a card (or its answer) appears
+     * @param confirm           show the answer; then pick the suggested grade. Enter always does this too.
+     * @param keepPlaying       leave a card that's being graded and keep playing
+     * @param graceMillis       the card's own keys (the ones above, the grade keys, Enter) are ignored for this long after
+     *                          a card appears
+     * @param typingGraceMillis every other key, i.e. typing an answer, is ignored for this (much shorter) time
      */
-    public record CardKeys(Integer confirm, Integer again, Integer hard, Integer good, Integer easy, Integer keepPlaying, Integer graceMillis) {
+    public record CardKeys(Integer confirm, Integer again, Integer hard, Integer good, Integer easy, Integer keepPlaying,
+                           Integer graceMillis, Integer typingGraceMillis) {
         // key codes as in com.mojang.blaze3d.platform.InputConstants: Space, 1, 2, 3, 4
-        public static final CardKeys DEFAULT = new CardKeys(44, 30, 31, 32, 33, 44, 1000);
+        public static final CardKeys DEFAULT = new CardKeys(44, 30, 31, 32, 33, 44, 1000, 200);
         public static final int MAX_GRACE_MILLIS = 5000;
+        public static final int MAX_TYPING_GRACE_MILLIS = 2000;
 
         @SuppressWarnings("ConstantValue")
         public CardKeys {
@@ -192,6 +258,8 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
             if (keepPlaying == null) keepPlaying = 44;
             if (graceMillis == null) graceMillis = 1000;
             graceMillis = Math.max(0, Math.min(MAX_GRACE_MILLIS, graceMillis));
+            if (typingGraceMillis == null) typingGraceMillis = 200;
+            typingGraceMillis = Math.max(0, Math.min(MAX_TYPING_GRACE_MILLIS, typingGraceMillis));
         }
     }
 
@@ -234,10 +302,12 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
      * @param notes         a few sentences about this deck (subject, strictness, what an answer must contain) that are
      *                      added to the grading prompt; "" = none. The usual way to tune grading for a deck.
      * @param layout        this deck's own card sizes, or null for the default ones
+     * @param autoGradeFrom which grades are applied on their own for this deck, or null for the main setting
      */
     public record DeckProfile(String deck, String model, String prompt, Boolean customRewards, String rewardPreset,
                               List<String> correctCommands, List<String> wrongCommands, CommandSelectionStrategy strategy,
-                              Integer intervalSeconds, String notes, @Nullable CardLayout layout) {
+                              Integer intervalSeconds, String notes, @Nullable CardLayout layout,
+                              @Nullable AutoGradeFrom autoGradeFrom) {
         @SuppressWarnings("ConstantValue")
         public DeckProfile {
             if (deck == null) deck = "";
@@ -254,16 +324,20 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
 
         /** An otherwise untouched profile for a deck, e.g. to give it just one setting of its own. */
         public static DeckProfile empty(String deck) {
-            return new DeckProfile(deck, "", "", false, "", List.of(), List.of(), CommandSelectionStrategy.EXECUTE_ALL, 0, "", null);
+            return new DeckProfile(deck, "", "", false, "", List.of(), List.of(), CommandSelectionStrategy.EXECUTE_ALL, 0, "", null, null);
+        }
+
+        public DeckProfile withAutoGradeFrom(@Nullable AutoGradeFrom autoGradeFrom) {
+            return new DeckProfile(deck, model, prompt, customRewards, rewardPreset, correctCommands, wrongCommands, strategy, intervalSeconds, notes, layout, autoGradeFrom);
         }
 
         public DeckProfile withLayout(@Nullable CardLayout layout) {
-            return new DeckProfile(deck, model, prompt, customRewards, rewardPreset, correctCommands, wrongCommands, strategy, intervalSeconds, notes, layout);
+            return new DeckProfile(deck, model, prompt, customRewards, rewardPreset, correctCommands, wrongCommands, strategy, intervalSeconds, notes, layout, autoGradeFrom);
         }
 
         /** Whether this profile changes nothing, i.e. doesn't need to be saved. */
         public boolean isDefault() {
-            return model.isBlank() && prompt.isBlank() && !customRewards && intervalSeconds == 0 && notes.isBlank() && layout == null;
+            return model.isBlank() && prompt.isBlank() && !customRewards && intervalSeconds == 0 && notes.isBlank() && layout == null && autoGradeFrom == null;
         }
     }
 

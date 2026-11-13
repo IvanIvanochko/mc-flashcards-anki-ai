@@ -36,12 +36,13 @@ class CardKeysScreen extends Screen {
     private final StringWidget titleText = new StringWidget(Component.literal("Card Keys"), Minecraft.getInstance().font);
     private final StringWidget[] labels = new StringWidget[ACTIONS.length];
     private final Button[] keyButtons = new Button[ACTIONS.length];
-    private final IntSlider graceSlider; // tenths of a second
+    private final IntSlider graceSlider;       // tenths of a second, for the card's own keys
+    private final IntSlider typingGraceSlider; // tenths of a second, for typing
     private final MultiLineTextWidget note = new MultiLineTextWidget(Component.literal(
             "Enter always shows the answer / confirms, and the number pad's 1-4 always grade. "
             + "While you type an answer, only Enter checks it. The mouse always works.").withColor(GRAY), Minecraft.getInstance().font);
     private final Button resetButton = Button.builder(Component.literal("Reset"), _ -> reset())
-            .tooltip(Tooltip.create(Component.literal("Space, 1, 2, 3, 4, Space and a 1 second pause"))).size(70, 20).build();
+            .tooltip(Tooltip.create(Component.literal("Space, 1, 2, 3, 4, Space; card keys wait 1 second, typing waits 0.2"))).size(70, 20).build();
     private final Button doneButton = Button.builder(Component.literal("Done"), _ -> this.onClose()).size(100, 20).build();
 
     CardKeysScreen() {
@@ -60,11 +61,17 @@ class CardKeysScreen extends Screen {
         }
 
         graceSlider = new IntSlider(WIDTH, 20, 0, ModConfig.CardKeys.MAX_GRACE_MILLIS / 100, keys.graceMillis() / 100,
-                tenths -> Component.literal(tenths == 0 ? "Ignore keys when a card appears: off"
-                        : "Ignore keys for " + String.format(Locale.ROOT, "%.1f", tenths / 10.0) + " s when a card appears"));
+                tenths -> Component.literal(tenths == 0 ? "Card keys work at once when a card appears"
+                        : "Card keys wait " + String.format(Locale.ROOT, "%.1f", tenths / 10.0) + " s when a card appears"));
         graceSlider.setTooltip(Tooltip.create(Component.literal(
-                "A card can pop up while you're running and jumping. For this long (and until you let go of the keys you were holding), "
-                + "the keyboard is ignored on the card, so a stray Space can't flip or answer it.")));
+                "A card can pop up while you're running and jumping. For this long, the keys above (and Enter) do nothing on the card, "
+                + "so a stray Space can't flip or answer it. A key you're still holding also has to be let go first.")));
+        typingGraceSlider = new IntSlider(WIDTH, 20, 0, ModConfig.CardKeys.MAX_TYPING_GRACE_MILLIS / 100, keys.typingGraceMillis() / 100,
+                tenths -> Component.literal(tenths == 0 ? "Typing works at once when a card appears"
+                        : "Typing waits " + String.format(Locale.ROOT, "%.1f", tenths / 10.0) + " s when a card appears"));
+        typingGraceSlider.setTooltip(Tooltip.create(Component.literal(
+                "How soon you can start typing an answer. Kept short so you can write straight away; "
+                + "movement keys you're still holding (W, A, S, D, jump) have to be let go first, so they don't type letters.")));
         note.setCentered(true);
         updateButtons();
     }
@@ -74,6 +81,7 @@ class CardKeysScreen extends Screen {
         int[] defaults = {d.confirm(), d.again(), d.hard(), d.good(), d.easy(), d.keepPlaying()};
         System.arraycopy(defaults, 0, keyCodes, 0, keyCodes.length);
         graceSlider.setIntValueSilently(d.graceMillis() / 100);
+        typingGraceSlider.setIntValueSilently(d.typingGraceMillis() / 100);
         listening = -1;
         updateButtons();
     }
@@ -107,6 +115,9 @@ class CardKeysScreen extends Screen {
         y += 2;
         graceSlider.setRectangle(w, 20, x, y);
         addRenderableWidget(graceSlider);
+        y += 22;
+        typingGraceSlider.setRectangle(w, 20, x, y);
+        addRenderableWidget(typingGraceSlider);
         y += 24;
 
         int buttonsY = Math.max(height - 26, y + 22);
@@ -139,7 +150,8 @@ class CardKeysScreen extends Screen {
     @Override
     public void onClose() {
         FileManager.updateConfig(FileManager.getConfig().withCardKeys(new ModConfig.CardKeys(
-                keyCodes[0], keyCodes[1], keyCodes[2], keyCodes[3], keyCodes[4], keyCodes[5], graceSlider.intValue() * 100)));
+                keyCodes[0], keyCodes[1], keyCodes[2], keyCodes[3], keyCodes[4], keyCodes[5],
+                graceSlider.intValue() * 100, typingGraceSlider.intValue() * 100)));
         Minecraft.getInstance().gui.setScreen(parent);
     }
 }

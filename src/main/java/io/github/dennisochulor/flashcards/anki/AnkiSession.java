@@ -44,6 +44,11 @@ public final class AnkiSession {
     private static final AtomicBoolean FETCHING = new AtomicBoolean(false);
     private static final String MEDIA_SUBFOLDER = "anki";
 
+    /** @return whether a card is on its way: being fetched from Anki, or fetched and waiting for the player to be free */
+    public static boolean isFetching() {
+        return FETCHING.get();
+    }
+
     public static boolean isEnabled() {
         return FileManager.getConfig().ankiMode();
     }
