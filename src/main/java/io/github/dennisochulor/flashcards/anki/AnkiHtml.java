@@ -14,7 +14,19 @@ import java.util.regex.Pattern;
 public final class AnkiHtml {
     private AnkiHtml() {}
 
-    public record Rendered(String text, List<String> images) {}
+    /**
+     * @param text   all the text, without the pictures
+     * @param images the picture file names, in order
+     * @param parts  text and pictures in the order they appear on the card
+     */
+    public record Rendered(String text, List<String> images, List<Part> parts) {}
+
+    /** A run of text, or one picture. Exactly one of the two is set. */
+    public record Part(String text, String image) {
+        public boolean isImage() {
+            return !image.isEmpty();
+        }
+    }
 
     private static final Pattern REMOVE_BLOCKS = Pattern.compile("(?is)<(style|script|head|title)\\b[^>]*>.*?</\\1\\s*>|<!--.*?-->");
     private static final Pattern AV_TAGS = Pattern.compile("(?i)\\[(?:sound:[^\\]]*|anki:play:[^\\]]*)\\]");
@@ -62,7 +74,10 @@ public final class AnkiHtml {
         s = replaceMath(s, INLINE_MATH, false, forAi);
 
         List<String> images = new ArrayList<>();
+        List<Part> parts = new ArrayList<>();
         StringBuilder out = new StringBuilder();
+        int partStart = 0;      // where in "out" the text since the last picture begins
+        String partPrefix = ""; // formatting that was switched on before that point and still applies
         int bold = 0, italic = 0, underline = 0;
         int last = 0;
         Matcher tag = TAG.matcher(s);
@@ -87,7 +102,14 @@ public final class AnkiHtml {
                     if (src.find()) {
                         String file = src.group(1) != null ? src.group(1) : src.group(2) != null ? src.group(2) : src.group(3);
                         file = decodeEntities(file).trim();
-                        if (!file.isEmpty() && !file.contains("://") && !file.startsWith("data:")) images.add(file);
+                        if (!file.isEmpty() && !file.contains("://") && !file.startsWith("data:")) {
+                            images.add(file);
+                            // close the text so far as its own part, so the picture lands exactly where it is on the card
+                            addTextPart(parts, partPrefix, out.substring(partStart));
+                            parts.add(new Part("", file));
+                            partStart = out.length();
+                            partPrefix = forAi ? "" : (bold > 0 ? "§l" : "") + (italic > 0 ? "§o" : "") + (underline > 0 ? "§n" : "");
+                        }
                     }
                 }
                 default -> {}
@@ -100,13 +122,22 @@ public final class AnkiHtml {
             }
         }
         appendText(out, s.substring(last));
+        addTextPart(parts, partPrefix, out.substring(partStart));
 
-        String text = out.toString()
-                .replaceAll("[ \\t]+\\n", "\n")
+        return new Rendered(tidy(out.toString()), images, parts);
+    }
+
+    private static String tidy(String text) {
+        return text.replaceAll("[ \\t]+\\n", "\n")
                 .replaceAll("\\n[ \\t]+", "\n")
                 .replaceAll("\\n{3,}", "\n\n")
                 .strip();
-        return new Rendered(text, images);
+    }
+
+    private static void addTextPart(List<Part> parts, String prefix, String raw) {
+        String text = tidy(raw);
+        // a part that is nothing but formatting codes would show as an empty gap
+        if (!text.replaceAll("§.", "").isBlank()) parts.add(new Part(prefix + text, ""));
     }
 
     /** Converts MathJax/LaTeX spans to Unicode text, emitted as escaped HTML so the normal tag handling (bold, line breaks) applies. */

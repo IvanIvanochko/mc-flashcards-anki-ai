@@ -47,6 +47,14 @@ class GeneralConfigScreen extends Screen {
             .tooltip(Tooltip.create(Component.literal("Drag the study panel and the AI thinking indicator anywhere, and resize them.")))
             .size(200, 20).build();
 
+    private final Button cardSizeButton = Button.builder(Component.literal("Card Size..."), _ -> Minecraft.getInstance().gui.setScreen(
+                    new CardLayoutScreen("Card Size", FileManager.getConfig().cardLayout(), ModConfig.CardLayout.DEFAULT, false,
+                            layout -> { if (layout != null) FileManager.updateConfig(FileManager.getConfig().withCardLayout(layout)); })))
+            .tooltip(Tooltip.create(Component.literal(
+                    "How far the answer area may grow before it scrolls, how tall pictures may be, and how wide the card is.\n"
+                    + "These are the defaults; a deck can have its own (Deck Presets), and the cog on a card changes them on the spot.")))
+            .size(200, 20).build();
+
     private final Button cardKeysButton = Button.builder(Component.literal("Card Keys..."), _ -> Minecraft.getInstance().gui.setScreen(new CardKeysScreen()))
             .tooltip(Tooltip.create(Component.literal("Change the keys used on a card, and how long stray key presses are ignored when a card pops up.")))
             .size(200, 20).build();
@@ -63,6 +71,7 @@ class GeneralConfigScreen extends Screen {
         options.addChild(timerModeButton);
         options.addChild(hudButton);
         options.addChild(hudLayoutButton);
+        options.addChild(cardSizeButton);
         options.addChild(cardKeysButton);
 
         HeaderAndFooterLayout root = new HeaderAndFooterLayout(this, 25, 40);

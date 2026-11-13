@@ -17,6 +17,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * A scrollable panel that shows a flashcard at the normal font size: text, images, labelled sections,
@@ -46,8 +47,12 @@ public class CardView extends AbstractScrollArea {
         }
     }
 
-    /** @param imageName relative to the mod's media folder */
-    public record Image(String imageName, int maxSize) implements Block {}
+    /**
+     * A picture, shown at its natural size (one picture pixel per GUI pixel) unless that's wider than the card or
+     * taller than {@code maxHeight}; then it's scaled down to fit. Clicking it opens the full-size viewer.
+     * @param imageName relative to the mod's media folder
+     */
+    public record Image(String imageName, int maxHeight) implements Block {}
 
     /** A plain horizontal rule. */
     public record Divider() implements Block {}
@@ -75,6 +80,7 @@ public class CardView extends AbstractScrollArea {
     private int laidWidth = -1;
     private int laidContentHeight = 0;
     private int accent = 0;
+    private @Nullable Consumer<String> onImageClick = null;
 
     public CardView(Font font) {
         super(0, 0, 100, 100, Component.empty(), AbstractScrollArea.defaultSettings(font.lineHeight * 2));
@@ -143,14 +149,16 @@ public class CardView extends AbstractScrollArea {
                     laid.add(new Laid(block, y, height, lines, lineX, null, 0));
                 }
                 case Image image -> {
-                    ImageWidget widget = ImageUtils.getImageWidget(FileManager.getImageFile(image.imageName()), image.maxSize());
-                    if (widget.getWidth() > innerWidth) { // too wide: shrink, keeping the aspect ratio
-                        int size = Math.max(16, image.maxSize() * innerWidth / widget.getWidth());
-                        widget = ImageUtils.getImageWidget(FileManager.getImageFile(image.imageName()), size);
+                    ImageUtils.ImagePackage picture = ImageUtils.getImagePackage(FileManager.getImageFile(image.imageName()));
+                    int pictureWidth = Math.max(1, picture.width()), pictureHeight = Math.max(1, picture.height());
+                    if (picture.id() == ImageUtils.MISSING_TEXTURE_ID) pictureWidth = pictureHeight = 32; // placeholder
+                    int width = Math.min(innerWidth, pictureWidth);
+                    height = Math.max(1, (int) Math.round(width * (double) pictureHeight / pictureWidth));
+                    if (height > image.maxHeight()) { // too tall: shrink, keeping the shape
+                        height = Math.max(1, image.maxHeight());
+                        width = Math.max(1, (int) Math.round(height * (double) pictureWidth / pictureHeight));
                     }
-                    widget.setTooltip(null);
-                    height = widget.getHeight();
-                    laid.add(new Laid(block, y, height, List.of(), null, widget, 0));
+                    laid.add(new Laid(block, y, height, List.of(), null, ImageUtils.getImageWidget(picture, width, height), 0));
                 }
                 case Divider _ -> {
                     height = 1;
@@ -209,8 +217,21 @@ public class CardView extends AbstractScrollArea {
                 case Image _ -> {
                     ImageWidget image = item.image();
                     if (image != null) {
-                        image.setPosition(left + (innerWidth - image.getWidth()) / 2, y);
+                        int imageX = left + (innerWidth - image.getWidth()) / 2;
+                        image.setPosition(imageX, y);
                         image.extractRenderState(graphics, mouseX, mouseY, delta);
+                        boolean hovered = onImageClick != null && isMouseOver(mouseX, mouseY)
+                                && mouseX >= imageX && mouseX < imageX + image.getWidth() && mouseY >= y && mouseY < y + item.height();
+                        if (hovered) { // show it can be clicked
+                            graphics.outline(imageX, y, image.getWidth(), item.height(), 0xC0FFFFFF);
+                            String hint = "Click to enlarge";
+                            int hintWidth = font.width(hint) + 6;
+                            if (hintWidth <= image.getWidth() && item.height() >= font.lineHeight + 4) {
+                                int hintX = imageX + image.getWidth() - hintWidth, hintY = y + item.height() - font.lineHeight - 3;
+                                graphics.fill(hintX, hintY, hintX + hintWidth, hintY + font.lineHeight + 3, 0xD0000000);
+                                graphics.text(font, hint, hintX + 3, hintY + 2, CommonColors.WHITE, false);
+                            }
+                        }
                     }
                 }
                 case Divider _ -> graphics.fill(left, y, left + innerWidth, y + 1, RULE);
@@ -285,9 +306,38 @@ public class CardView extends AbstractScrollArea {
         return Math.max(font.lineHeight, height - PADDING * 2 - font.lineHeight);
     }
 
+    /** Called with a picture's name (relative to the media folder) when the player clicks it. */
+    public void setOnImageClick(@Nullable Consumer<String> onImageClick) {
+        this.onImageClick = onImageClick;
+    }
+
+    /** @return the name of the picture at this screen position, or null */
+    private @Nullable String imageAt(double mouseX, double mouseY) {
+        if (!isMouseOver(mouseX, mouseY)) return null;
+        ensureLayout();
+        int left = getX() + PADDING;
+        int innerWidth = innerWidth();
+        int top = getY() + PADDING - (int) scrollAmount();
+        for (Laid item : laid) {
+            ImageWidget image = item.image();
+            if (image == null || !(item.block() instanceof Image block)) continue;
+            int imageX = left + (innerWidth - image.getWidth()) / 2;
+            int y = top + item.y();
+            if (mouseX >= imageX && mouseX < imageX + image.getWidth() && mouseY >= y && mouseY < y + item.height()) return block.imageName();
+        }
+        return null;
+    }
+
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         boolean scrollbar = updateScrolling(event); // starts dragging the scrollbar
+        if (!scrollbar && onImageClick != null && !isOverScrollbar(event.x(), event.y())) {
+            String image = imageAt(event.x(), event.y());
+            if (image != null) {
+                onImageClick.accept(image);
+                return true;
+            }
+        }
         return super.mouseClicked(event, doubleClick) || scrollbar;
     }
 

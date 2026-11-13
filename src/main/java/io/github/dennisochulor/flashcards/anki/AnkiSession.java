@@ -130,40 +130,61 @@ public final class AnkiSession {
 
         AnkiHtml.Rendered question = AnkiHtml.render(current.questionHtml());
         AnkiHtml.Rendered answer = AnkiHtml.render(AnkiHtml.answerOnly(current.answerHtml()));
-        String questionImage = downloadFirstImage(anki, question.images());
-        List<String> answerOnlyImages = answer.images().stream().filter(i -> !question.images().contains(i)).toList();
-        String answerImage = downloadFirstImage(anki, answerOnlyImages);
+        List<AnkiCard.Part> questionParts = toCardParts(anki, question.parts());
+        List<AnkiCard.Part> answerParts = toCardParts(anki, answer.parts());
+        if (questionParts.isEmpty()) questionParts = List.of(new AnkiCard.Part("(empty card front)", ""));
 
-        String questionText = question.text().isBlank() && questionImage == null ? "(empty card front)" : question.text();
-        return new AnkiCard(current.cardId(), current.deckName(), questionText, questionImage, answer.text(), answerImage,
+        return new AnkiCard(current.cardId(), current.deckName(), question.text(), answer.text(),
                 current.buttons(), current.nextReviews(),
-                AnkiHtml.plainForAi(current.questionHtml()), AnkiHtml.plainForAi(AnkiHtml.answerOnly(current.answerHtml())));
+                AnkiHtml.plainForAi(current.questionHtml()), AnkiHtml.plainForAi(AnkiHtml.answerOnly(current.answerHtml())),
+                questionParts, answerParts);
     }
 
-    /** Copies the first displayable image from Anki's media folder into the mod's media folder. */
-    private static @Nullable String downloadFirstImage(AnkiConnect anki, List<String> filenames) {
-        for (String filename : filenames) {
-            String safeName = filename.replaceAll("[\\\\/:*?\"<>|]", "_");
-            String relative = MEDIA_SUBFOLDER + "/" + safeName;
-            File target = FileManager.getImageFile(relative);
-            if (!ImageUtils.FILE_NAME_EXTENSION_FILTER.accept(target)) continue; // e.g. svg/webp, which we can't draw
-            if (target.exists() && target.length() > 0) return relative;
-            try {
-                byte[] data = anki.retrieveMediaFile(filename);
-                if (data == null) {
-                    String decoded = URLDecoder.decode(filename, StandardCharsets.UTF_8);
-                    if (!decoded.equals(filename)) data = anki.retrieveMediaFile(decoded);
-                }
-                if (data == null) continue;
-                Files.createDirectories(target.getParentFile().toPath());
-                Files.write(target.toPath(), data);
-                return relative;
+    /**
+     * Fetches every picture of a card side from Anki and decodes it here, on the Anki thread, so the card opens without
+     * a hitch. A picture that can't be shown (e.g. SVG or WebP, or missing in Anki) becomes a short note in its place.
+     */
+    private static List<AnkiCard.Part> toCardParts(AnkiConnect anki, List<AnkiHtml.Part> parts) {
+        List<AnkiCard.Part> result = new java.util.ArrayList<>();
+        for (AnkiHtml.Part part : parts) {
+            if (!part.isImage()) {
+                result.add(new AnkiCard.Part(part.text(), ""));
+                continue;
             }
-            catch (AnkiConnect.AnkiException | IOException e) {
-                Flashcards.LOGGER.warn("Couldn't copy Anki image {}", filename, e);
+            String relative = downloadImage(anki, part.image());
+            if (relative == null) {
+                result.add(new AnkiCard.Part("§7§o(picture not shown: " + part.image().replace('§', '$') + ")", ""));
+            }
+            else {
+                ImageUtils.predecode(FileManager.getImageFile(relative));
+                result.add(new AnkiCard.Part("", relative));
             }
         }
-        return null;
+        return result;
+    }
+
+    /** Copies a picture from Anki's media folder into the mod's media folder. @return its name there, or null if it can't be shown */
+    private static @Nullable String downloadImage(AnkiConnect anki, String filename) {
+        String safeName = filename.replaceAll("[\\\\/:*?\"<>|]", "_");
+        String relative = MEDIA_SUBFOLDER + "/" + safeName;
+        File target = FileManager.getImageFile(relative);
+        if (!ImageUtils.FILE_NAME_EXTENSION_FILTER.accept(target)) return null; // e.g. svg/webp, which we can't draw
+        if (target.exists() && target.length() > 0) return relative;
+        try {
+            byte[] data = anki.retrieveMediaFile(filename);
+            if (data == null) {
+                String decoded = URLDecoder.decode(filename, StandardCharsets.UTF_8);
+                if (!decoded.equals(filename)) data = anki.retrieveMediaFile(decoded);
+            }
+            if (data == null) return null;
+            Files.createDirectories(target.getParentFile().toPath());
+            Files.write(target.toPath(), data);
+            return relative;
+        }
+        catch (AnkiConnect.AnkiException | IOException | RuntimeException e) {
+            Flashcards.LOGGER.warn("Couldn't copy Anki image {}", filename, e);
+            return null;
+        }
     }
 
     // ---------------------------------------------------------------- answering

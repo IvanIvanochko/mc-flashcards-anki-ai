@@ -14,9 +14,10 @@ import java.util.List;
  * @param prompt grading instructions as written by the player, or "" for the built-in default
  * @param intervalSeconds time until the next question after a card from this deck
  * @param notes  the deck's notes for the grader, or ""
+ * @param layout how big things are on this deck's cards
  */
 public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> correctCommands, List<String> wrongCommands,
-                           ModConfig.CommandSelectionStrategy strategy, int intervalSeconds, String notes) {
+                           ModConfig.CommandSelectionStrategy strategy, int intervalSeconds, String notes, ModConfig.CardLayout layout) {
 
     /** The complete instructions the grading AI gets for a card from this deck. */
     public String systemPrompt() {
@@ -34,10 +35,11 @@ public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> c
         int interval = config.intervalTotalSeconds();
 
         String notes = "";
+        ModConfig.CardLayout layout = config.cardLayout();
 
-        boolean modelSet = false, promptSet = false, rewardsSet = false, intervalSet = false, notesSet = false;
+        boolean modelSet = false, promptSet = false, rewardsSet = false, intervalSet = false, notesSet = false, layoutSet = false;
         String name = deck == null ? "" : deck;
-        while (!name.isEmpty() && !(modelSet && promptSet && rewardsSet && intervalSet && notesSet)) {
+        while (!name.isEmpty() && !(modelSet && promptSet && rewardsSet && intervalSet && notesSet && layoutSet)) {
             ModConfig.DeckProfile profile = exact(config.deckProfiles(), name);
             if (profile != null) {
                 if (!modelSet && !profile.model().isBlank()) {
@@ -54,6 +56,11 @@ public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> c
                     strategy = profile.strategy();
                     rewardsSet = true;
                 }
+                ModConfig.CardLayout own = profile.layout();
+                if (!layoutSet && own != null) {
+                    layout = own;
+                    layoutSet = true;
+                }
                 if (!notesSet && !profile.notes().isBlank()) {
                     notes = profile.notes();
                     notesSet = true;
@@ -66,7 +73,7 @@ public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> c
             int parentEnd = name.lastIndexOf("::");
             name = parentEnd < 0 ? "" : name.substring(0, parentEnd);
         }
-        return new DeckSettings(ai, prompt, correct, wrong, strategy, interval, notes);
+        return new DeckSettings(ai, prompt, correct, wrong, strategy, interval, notes, layout);
     }
 
     /** @return the profile saved for exactly this deck, or null */

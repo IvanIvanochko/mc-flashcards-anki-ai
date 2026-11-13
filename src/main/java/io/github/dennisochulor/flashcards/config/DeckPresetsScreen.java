@@ -42,9 +42,10 @@ class DeckPresetsScreen extends Screen {
         boolean customRewards = false;
         RewardsConfigScreen.Rewards rewards = NO_REWARDS;
         int intervalSeconds = 0; // 0 = default
+        ModConfig.@Nullable CardLayout layout = null; // null = default sizes
 
         boolean isDefault() {
-            return model.isBlank() && prompt.isBlank() && notes.isBlank() && !customRewards && intervalSeconds == 0;
+            return model.isBlank() && prompt.isBlank() && notes.isBlank() && !customRewards && intervalSeconds == 0 && layout == null;
         }
     }
 
@@ -84,6 +85,10 @@ class DeckPresetsScreen extends Screen {
     private final EditBox secondsBox = new EditBox(Minecraft.getInstance().font, 30, 20, Component.literal("Seconds"));
     private String timeBoxesShow = ""; // which deck's time the two boxes currently hold
     private boolean fillingTimeBoxes = false;
+    private final Button sizeButton = Button.builder(Component.empty(), _ -> openCardSize())
+            .tooltip(Tooltip.create(Component.literal(
+                    "Give this deck its own card sizes: how far the answer area may grow, how tall pictures may be, how wide the card is.\n"
+                    + "Handy for a deck full of pictures. You can also set this from a card of the deck: click the cog in its corner."))).build();
     private final Button clearButton = Button.builder(Component.literal("Clear this deck's preset"), _ -> {
         drafts.remove(selected);
         needsRebuild = true;
@@ -102,6 +107,7 @@ class DeckPresetsScreen extends Screen {
             draft.rewards = new RewardsConfigScreen.Rewards(profile.correctCommands(), profile.wrongCommands(), profile.strategy(), profile.rewardPreset());
             draft.intervalSeconds = profile.intervalSeconds();
             draft.notes = profile.notes();
+            draft.layout = profile.layout();
             drafts.put(profile.deck(), draft);
         }
         selected = config.ankiDeck();
@@ -215,6 +221,21 @@ class DeckPresetsScreen extends Screen {
         return new String[] {main.isBlank() ? GradingPrompt.DEFAULT_TEMPLATE : main, "main"};
     }
 
+    /** The sizes this deck gets when its own are left on Default: the nearest parent's, or the default ones. */
+    private ModConfig.CardLayout inheritedLayout() {
+        for (String name = parentOf(selected); name != null; name = parentOf(name)) {
+            Draft draft = drafts.get(name);
+            if (draft != null && draft.layout != null) return draft.layout;
+        }
+        return FileManager.getConfig().cardLayout();
+    }
+
+    private void openCardSize() {
+        Draft draft = draft();
+        Minecraft.getInstance().gui.setScreen(new CardLayoutScreen("Card Size · " + shortName(selected), draft.layout, inheritedLayout(), true,
+                layout -> draft.layout = layout));
+    }
+
     /** The deck's notes, with the whole-prompt editor reachable from there as the advanced option. */
     private void openNotes() {
         Draft draft = draft();
@@ -288,7 +309,7 @@ class DeckPresetsScreen extends Screen {
         y = top;
         hintText.setMaxWidth(column);
         if (selected.isBlank()) {
-            hintText.setMessage(Component.literal("Pick a deck on the left to give it its own AI model, notes for the AI, rewards or time between cards.").withColor(GRAY));
+            hintText.setMessage(Component.literal("Pick a deck on the left to give it its own AI model, notes for the AI, rewards, time between cards or card size.").withColor(GRAY));
             hintText.setPosition(rightX + (column - hintText.getWidth()) / 2, y + 20);
             addRenderableWidget(hintText);
             return;
@@ -357,6 +378,11 @@ class DeckPresetsScreen extends Screen {
         }
         else timeBoxesShow = "";
 
+        sizeButton.setMessage(Component.literal("Card size: " + (draft.layout == null ? "Default" : "Own") + "..."));
+        sizeButton.setRectangle(column, 20, rightX, y);
+        addRenderableWidget(sizeButton);
+        y += 24;
+
         clearButton.active = !draft.isDefault();
         clearButton.setRectangle(column, 20, rightX, y);
         addRenderableWidget(clearButton);
@@ -374,7 +400,7 @@ class DeckPresetsScreen extends Screen {
         drafts.forEach((deck, draft) -> {
             if (deck.isBlank() || draft.isDefault()) return;
             profiles.add(new ModConfig.DeckProfile(deck, draft.model, draft.prompt, draft.customRewards, draft.rewards.presetName(),
-                    draft.rewards.correct(), draft.rewards.wrong(), draft.rewards.strategy(), draft.intervalSeconds, draft.notes));
+                    draft.rewards.correct(), draft.rewards.wrong(), draft.rewards.strategy(), draft.intervalSeconds, draft.notes, draft.layout));
         });
         FileManager.updateConfig(FileManager.getConfig().withDeckProfiles(profiles));
         QuestionScheduler.deckPresetsChanged(); // a running countdown follows a changed time straight away

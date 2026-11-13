@@ -2,6 +2,7 @@ package io.github.dennisochulor.flashcards.questions;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import io.github.dennisochulor.flashcards.FileManager;
+import io.github.dennisochulor.flashcards.IntSlider;
 import io.github.dennisochulor.flashcards.ScoreSlider;
 import io.github.dennisochulor.flashcards.ai.AiGrader;
 import io.github.dennisochulor.flashcards.ai.GradingPrompt;
@@ -19,9 +20,11 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.CommonColors;
@@ -43,11 +46,18 @@ import java.util.Locale;
  * (Again always; Hard/Good/Easy from the configured cut-offs). "Show Answer" means "I don't know": only Again is offered.
  * An answer the AI finds too vague (and would fail) gets one second chance, with a hint about what to be specific about.
  * <p>
+ * Layout: the question has its own panel that grows to fit and scrolls when the screen runs out; everything shown after
+ * it (the answer, your typed answer, the AI's grade) is in a second panel that grows only up to a set share of the
+ * screen and then scrolls on its own. The cog in the corner changes those sizes on the spot, for this deck or as the default.
+ * Pictures are shown where they are on the card, and clicking one opens it in a zoomable viewer.
+ * <p>
  * Mouse wheel and Page Up/Down scroll long cards (arrow keys too, when not typing).
  */
 public class AnkiQuestionScreen extends Screen {
     private static final int AGAIN = 1;
-    private static final int MAX_CARD_WIDTH = 480;
+    private static final int MIN_PANEL_HEIGHT = 30;
+    private static final int PANEL_GAP = 4;
+    private static final int POPOVER_WIDTH = 200;
     private static final int HEADER_HEIGHT = 22;
     private static final int BUTTON_HEIGHT = 20;
     private static final int BUTTON_GAP = 6;
@@ -84,7 +94,23 @@ public class AnkiQuestionScreen extends Screen {
     private final DeckSettings settings;
     private final ModConfig.AiGrading ai;
     private final boolean aiMode;
-    private final CardView cardView = new CardView(Minecraft.getInstance().font);
+    /** The question; grows to fit, scrolls when the screen runs out. */
+    private final CardView questionView = new CardView(Minecraft.getInstance().font);
+    /** Everything after the question; grows up to the layout's answer share of the screen, then scrolls. */
+    private final CardView answerView = new CardView(Minecraft.getInstance().font);
+    private boolean answerShown = false;
+    /** The sizes in use on this card; starts as the deck's (or default) layout, changed live by the cog panel. */
+    private ModConfig.CardLayout layout;
+    private boolean layoutOpen = false;
+    private boolean needsRelayout = false;
+    private String layoutStatus = "";
+    private int layoutStatusColor = GRAY;
+    private int popoverX, popoverY, popoverHeight;
+    private @Nullable IntSlider answerSizeSlider, imageSizeSlider, widthSlider;
+    private final Button layoutButton;
+    private final Button saveForDeckButton;
+    private final Button saveAsDefaultButton;
+    private final Button closeLayoutButton;
     private final StringWidget header;
     private final MultiLineEditBox answerBox;
     private final Button showAnswerButton;
@@ -99,7 +125,6 @@ public class AnkiQuestionScreen extends Screen {
 
     private Phase phase = Phase.QUESTION;
     private boolean answered = false;
-    private int answerBlockIndex = -1;
     private int attempt = 1;
     private String typedAnswer = "";
     private String firstAnswer = "";
@@ -115,7 +140,6 @@ public class AnkiQuestionScreen extends Screen {
     private boolean inputLocked = true;
     private long inputLockedAtMillis = System.currentTimeMillis();
     private long inputGraceMillis = keys.graceMillis();
-    private boolean scrollAfterInit = false;
     private long backgroundSinceMillis = 0;
 
     public AnkiQuestionScreen(AnkiCard card) {
@@ -126,6 +150,7 @@ public class AnkiQuestionScreen extends Screen {
         this.ai = settings.ai();
         // the AI only sees text: a card whose answer is just an image can't be graded by it
         this.aiMode = AiGrader.isEnabled(config, ai) && !card.answerForAi().isBlank();
+        this.layout = settings.layout();
         Font font = Minecraft.getInstance().font;
 
         String deck = card.deckName().isBlank() ? "Anki" : card.deckName();
@@ -151,6 +176,36 @@ public class AnkiQuestionScreen extends Screen {
         quitButton = Button.builder(Component.literal("Keep playing"), _ -> quitToGame())
                 .tooltip(Tooltip.create(Component.literal("Play while the AI finishes; this card comes back when it's graded. (" + keyName(keys.keepPlaying()) + " / Esc)")))
                 .size(90, 20).build();
+
+        layoutButton = Button.builder(Component.literal("⚙"), _ -> {
+                    layoutOpen = !layoutOpen;
+                    layoutStatus = "";
+                    needsRelayout = true;
+                })
+                .tooltip(Tooltip.create(Component.literal(
+                        "Card size. Change, while looking at this card, how tall the answer area and the pictures may get and how wide the card is. "
+                        + "Then keep it for this deck, or as the default.")))
+                .size(18, 16).build();
+        String deckLabel = card.deckName().isBlank() ? "this deck" : shortDeckName();
+        saveForDeckButton = Button.builder(Component.literal("This deck"), _ -> saveLayoutForDeck())
+                .tooltip(Tooltip.create(Component.literal(card.deckName().isBlank()
+                        ? "This card's deck isn't known, so sizes can only be saved as the default."
+                        : "Keep these sizes for \"" + deckLabel + "\" only (and its subdecks without sizes of their own). "
+                          + "You can change or remove them later in Deck Presets.")))
+                .build();
+        saveForDeckButton.active = !card.deckName().isBlank();
+        saveAsDefaultButton = Button.builder(Component.literal("Default"), _ -> saveLayoutAsDefault())
+                .tooltip(Tooltip.create(Component.literal("Keep these sizes as the default, for every deck that doesn't have sizes of its own.")))
+                .build();
+        closeLayoutButton = Button.builder(Component.literal("Close"), _ -> {
+                    layoutOpen = false;
+                    needsRelayout = true;
+                })
+                .tooltip(Tooltip.create(Component.literal("Close this panel. Sizes you didn't save apply to this card only.")))
+                .build();
+        questionView.setAccent(ACCENT_BLUE);
+        questionView.setOnImageClick(this::openPicture);
+        answerView.setOnImageClick(this::openPicture);
 
         List<Integer> buttons = card.buttons().isEmpty() ? List.of(1, 2, 3, 4) : card.buttons();
         for (int i = 0; i < buttons.size(); i++) {
@@ -300,8 +355,19 @@ public class AnkiQuestionScreen extends Screen {
         return String.format(Locale.ROOT, "%.2f", score);
     }
 
-    private int imageSize() {
-        return Math.max(48, Math.min(160, height / 3));
+    /** How tall a picture may be on the card, from the layout's share of the screen. */
+    private int imageMaxHeight() {
+        return Math.max(24, height * layout.imagePercent() / 100);
+    }
+
+    private String shortDeckName() {
+        String deck = card.deckName();
+        int i = deck.lastIndexOf("::");
+        return i < 0 ? deck : deck.substring(i + 2);
+    }
+
+    private void openPicture(String imageName) {
+        Minecraft.getInstance().gui.setScreen(new ImageViewerScreen(imageName)); // comes back to this card when closed
     }
 
     // ---------------------------------------------------------------- card content
@@ -314,17 +380,24 @@ public class AnkiQuestionScreen extends Screen {
         return Component.literal(text.replace('§', '$')); // a typed § would be read as a formatting code
     }
 
+    /** Text and pictures in the order they are on the card. */
+    private void addParts(List<CardView.Block> blocks, List<AnkiCard.Part> parts) {
+        for (AnkiCard.Part part : parts) {
+            blocks.add(part.isImage()
+                    ? new CardView.Image(part.image(), imageMaxHeight())
+                    : new CardView.Text(Component.literal(part.text()), CommonColors.WHITE));
+        }
+    }
+
     private List<CardView.Block> questionBlocks() {
         List<CardView.Block> blocks = new ArrayList<>();
-        if (card.questionImage() != null) blocks.add(new CardView.Image(card.questionImage(), imageSize()));
-        if (!card.question().isBlank()) blocks.add(new CardView.Text(Component.literal(card.question()), CommonColors.WHITE));
+        addParts(blocks, card.questionParts());
         return blocks;
     }
 
     private void addCardAnswer(List<CardView.Block> blocks) {
-        if (card.answerImage() != null) blocks.add(new CardView.Image(card.answerImage(), imageSize()));
-        if (!card.answer().isBlank()) blocks.add(new CardView.Text(Component.literal(card.answer()), CommonColors.WHITE));
-        else if (card.answerImage() == null) blocks.add(new CardView.Text(heading("(no answer text)"), GRAY));
+        if (card.answerParts().isEmpty()) blocks.add(new CardView.Text(heading("(the answer side is empty)"), GRAY));
+        else addParts(blocks, card.answerParts());
     }
 
     private static CardView.Section section(String label) {
@@ -373,8 +446,9 @@ public class AnkiQuestionScreen extends Screen {
         return new CardView.Meter(score, ai.hardFrom(), ai.goodFrom(), ai.easyFrom(), METER_NAMES, METER_COLORS);
     }
 
-    private List<CardView.Block> blocksForPhase() {
-        List<CardView.Block> blocks = questionBlocks();
+    /** What goes in the second panel, below the question. Empty while only the question is shown. */
+    private List<CardView.Block> answerBlocks() {
+        List<CardView.Block> blocks = new ArrayList<>();
         switch (phase) {
             case QUESTION -> {}
             case SECOND_CHANCE -> {
@@ -385,16 +459,14 @@ public class AnkiQuestionScreen extends Screen {
             }
             case REVEALED, GAVE_UP -> {
                 blocks.add(section("ANSWER"));
-                answerBlockIndex = blocks.size() - 1;
                 addCardAnswer(blocks);
             }
-            case GRADING -> addTypedAnswer(blocks); // the thinking animation is drawn below the card
+            case GRADING -> addTypedAnswer(blocks); // the thinking animation is drawn below the panels
             case GRADE_ERROR -> {
                 addTypedAnswer(blocks);
                 blocks.add(new CardView.Text(Component.literal("Couldn't grade: " + gradeError), CommonColors.SOFT_RED));
             }
             case GRADED -> {
-                answerBlockIndex = blocks.size(); // the "YOUR ANSWER" section
                 addTypedAnswer(blocks);
                 blocks.add(section("AI GRADE"));
                 if (aiGrade != null) addVerdict(blocks, aiGrade);
@@ -403,6 +475,11 @@ public class AnkiQuestionScreen extends Screen {
             }
         }
         return blocks;
+    }
+
+    /** The panel the keyboard and a wheel turn outside both panels scroll: the answer once it's there, else the question. */
+    private CardView scrollTarget() {
+        return answerShown ? answerView : questionView;
     }
 
     /** The colour of the thin line along the top of the card: what state this card is in. */
@@ -421,33 +498,83 @@ public class AnkiQuestionScreen extends Screen {
     @Override
     public void init() {
         retryButton.setTooltip(Tooltip.create(Component.literal("Ask the AI to grade your answer again")));
-        // blocks depend on the screen height (image size), so rebuild them on resize
-        cardView.setBlocks(blocksForPhase());
-        cardView.setAccent(accentForPhase());
+        Font font = Minecraft.getInstance().font;
 
-        int cardWidth = Math.min(MAX_CARD_WIDTH, width - 32);
+        int cardWidth = Math.max(160, Math.min(width - 16, width * layout.widthPercent() / 100));
         int cardX = (width - cardWidth) / 2;
         boolean typing = isTyping();
         boolean slider = phase == Phase.GRADED && ai.adjustScore();
-        int bottomBlock = (phase == Phase.GRADING ? ThinkingAnimation.height(Minecraft.getInstance().font) + 4 : BUTTON_HEIGHT)
+        int bottomBlock = (phase == Phase.GRADING ? ThinkingAnimation.height(font) + 4 : BUTTON_HEIGHT)
                 + (typing ? ANSWER_BOX_HEIGHT + 6 : 0) + (slider ? BUTTON_HEIGHT + 4 : 0);
-        int maxCardHeight = height - HEADER_HEIGHT - 8 - bottomBlock - 8;
+        int available = height - HEADER_HEIGHT - 8 - bottomBlock - 8;
 
-        header.setMaxWidth(cardWidth);
+        // The cog's panel floats over the card, so its controls must be asked about clicks before the panels under it
+        // (added first), but drawn after them (see the end of this method).
+        boolean popover = layoutOpen;
+        if (popover) {
+            createLayoutSliders();
+            popoverX = Math.max(4, cardX + cardWidth - POPOVER_WIDTH);
+            popoverY = HEADER_HEIGHT + 2;
+            int inner = POPOVER_WIDTH - 8;
+            int y = popoverY + 4;
+            for (IntSlider layoutSlider : List.of(answerSizeSlider, imageSizeSlider, widthSlider)) {
+                layoutSlider.setRectangle(inner, 20, popoverX + 4, y);
+                addWidget(layoutSlider);
+                y += 22;
+            }
+            y += 2;
+            int third = (inner - 8) / 3;
+            saveForDeckButton.setRectangle(third, 20, popoverX + 4, y);
+            saveAsDefaultButton.setRectangle(third, 20, popoverX + 4 + third + 4, y);
+            closeLayoutButton.setRectangle(inner - 2 * (third + 4), 20, popoverX + 4 + 2 * (third + 4), y);
+            addWidget(saveForDeckButton);
+            addWidget(saveAsDefaultButton);
+            addWidget(closeLayoutButton);
+            popoverHeight = y + 20 + 4 + font.lineHeight + 4 - popoverY;
+        }
+
+        header.setMaxWidth(cardWidth - 44);
         header.setPosition(width / 2 - header.getWidth() / 2, (HEADER_HEIGHT - 9) / 2);
         addRenderableWidget(header);
+        layoutButton.setPosition(cardX + cardWidth - layoutButton.getWidth(), 3);
+        addRenderableWidget(layoutButton);
 
-        cardView.setRectangle(cardWidth, 40, cardX, HEADER_HEIGHT); // width first, so the content can be measured
-        int cardHeight = Math.max(40, Math.min(maxCardHeight, cardView.preferredHeight()));
-        cardView.setHeight(cardHeight);
-        cardView.refreshScrollAmount();
-        addRenderableWidget(cardView);
+        // blocks depend on the layout and the screen size (picture heights), so they're rebuilt here
+        List<CardView.Block> answerBlocks = answerBlocks();
+        answerShown = !answerBlocks.isEmpty();
+        questionView.setBlocks(questionBlocks());
+        questionView.setRectangle(cardWidth, MIN_PANEL_HEIGHT, cardX, HEADER_HEIGHT); // width first, so the content can be measured
+        int questionHeight;
+        int answerHeight = 0;
+        if (answerShown) {
+            answerView.setBlocks(answerBlocks);
+            answerView.setAccent(accentForPhase());
+            answerView.setRectangle(cardWidth, MIN_PANEL_HEIGHT, cardX, HEADER_HEIGHT);
+            // the answer area grows with its content, but only up to its share of the screen; then it scrolls
+            int cap = Math.max(MIN_PANEL_HEIGHT, height * layout.answerPercent() / 100);
+            answerHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(Math.min(answerView.preferredHeight(), cap), available - PANEL_GAP - MIN_PANEL_HEIGHT));
+            // the question gets what's left, and scrolls if that isn't enough
+            questionHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(questionView.preferredHeight(), available - PANEL_GAP - answerHeight));
+        }
+        else questionHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(questionView.preferredHeight(), available));
 
-        int y = HEADER_HEIGHT + cardHeight + 8;
+        questionView.setHeight(questionHeight);
+        questionView.refreshScrollAmount();
+        addRenderableWidget(questionView);
+        int y = HEADER_HEIGHT + questionHeight;
+        if (answerShown) {
+            y += PANEL_GAP;
+            answerView.setRectangle(cardWidth, answerHeight, cardX, y);
+            answerView.refreshScrollAmount();
+            addRenderableWidget(answerView);
+            y += answerHeight;
+        }
+        y += 8;
+
         if (typing) {
             answerBox.setRectangle(cardWidth, ANSWER_BOX_HEIGHT, cardX, y);
             addRenderableWidget(answerBox);
-            setInitialFocus(answerBox);
+            if (!popover) setInitialFocus(answerBox);
             y += ANSWER_BOX_HEIGHT + 6;
         }
         if (slider) {
@@ -455,7 +582,7 @@ public class AnkiQuestionScreen extends Screen {
                 scoreSlider = new ScoreSlider(200, BUTTON_HEIGHT, "Your score: ", score, value -> {
                     score = value;
                     updateGradeButtons();
-                    cardView.replaceMeter(meter()); // move the marker; nothing else on the card changes
+                    answerView.replaceMeter(meter()); // move the marker; nothing else on the card changes
                 });
                 scoreSlider.setTooltip(Tooltip.create(Component.literal("Disagree with the AI? Drag to change the score; it unlocks the buttons.")));
             }
@@ -494,7 +621,7 @@ public class AnkiQuestionScreen extends Screen {
                 Button button = gradeButtons.get(Math.max(0, again));
                 button.setRectangle(120, BUTTON_HEIGHT, width / 2 - 60, y);
                 addRenderableWidget(button);
-                setInitialFocus(button);
+                if (!popover) setInitialFocus(button);
             }
             case REVEALED, GRADED -> {
                 placeRow(y, cardWidth, gradeButtons, 110);
@@ -502,10 +629,88 @@ public class AnkiQuestionScreen extends Screen {
             }
         }
 
-        if (scrollAfterInit) { // reopened after grading in the background
-            scrollAfterInit = false;
-            scrollForPhase();
+        if (popover) { // drawn last, so it sits on top of everything
+            addRenderableOnly(this::extractPopoverBackground);
+            addRenderableOnly(answerSizeSlider);
+            addRenderableOnly(imageSizeSlider);
+            addRenderableOnly(widthSlider);
+            addRenderableOnly(saveForDeckButton);
+            addRenderableOnly(saveAsDefaultButton);
+            addRenderableOnly(closeLayoutButton);
         }
+    }
+
+    // ---------------------------------------------------------------- the cog's size panel
+
+    private void createLayoutSliders() {
+        if (answerSizeSlider != null) return;
+        answerSizeSlider = new IntSlider(POPOVER_WIDTH - 8, 20, ModConfig.CardLayout.MIN_ANSWER, ModConfig.CardLayout.MAX_ANSWER, layout.answerPercent(),
+                percent -> Component.literal("Answer area: up to " + percent + "%"), percent -> changeLayout(
+                        new ModConfig.CardLayout(percent, layout.imagePercent(), layout.widthPercent())));
+        answerSizeSlider.setTooltip(Tooltip.create(Component.literal(
+                "How much of the screen's height the answer area may take. A longer answer scrolls inside it. "
+                + "The question gets the rest of the screen.")));
+        imageSizeSlider = new IntSlider(POPOVER_WIDTH - 8, 20, ModConfig.CardLayout.MIN_IMAGE, ModConfig.CardLayout.MAX_IMAGE, layout.imagePercent(),
+                percent -> Component.literal("Pictures: up to " + percent + "% tall"), percent -> changeLayout(
+                        new ModConfig.CardLayout(layout.answerPercent(), percent, layout.widthPercent())));
+        imageSizeSlider.setTooltip(Tooltip.create(Component.literal(
+                "How tall a picture may be on the card, as a share of the screen's height. Click any picture to see it full size.")));
+        widthSlider = new IntSlider(POPOVER_WIDTH - 8, 20, ModConfig.CardLayout.MIN_WIDTH, ModConfig.CardLayout.MAX_WIDTH, layout.widthPercent(),
+                percent -> Component.literal("Card width: " + percent + "%"), percent -> changeLayout(
+                        new ModConfig.CardLayout(layout.answerPercent(), layout.imagePercent(), percent)));
+        widthSlider.setTooltip(Tooltip.create(Component.literal("How wide the card is, as a share of the screen's width.")));
+    }
+
+    private void changeLayout(ModConfig.CardLayout changed) {
+        layout = changed;
+        layoutStatus = "";
+        needsRelayout = true; // applied on the next tick, so dragging a slider stays smooth
+    }
+
+    private void saveLayoutForDeck() {
+        String deck = card.deckName();
+        if (deck.isBlank()) return;
+        ModConfig config = FileManager.getConfig();
+        List<ModConfig.DeckProfile> profiles = new ArrayList<>(config.deckProfiles());
+        boolean found = false;
+        for (int i = 0; i < profiles.size(); i++) {
+            if (profiles.get(i).deck().equals(deck)) {
+                profiles.set(i, profiles.get(i).withLayout(layout));
+                found = true;
+            }
+        }
+        if (!found) profiles.add(ModConfig.DeckProfile.empty(deck).withLayout(layout));
+        FileManager.updateConfig(config.withDeckProfiles(profiles));
+        layoutStatus = "Saved for " + shortDeckName();
+        layoutStatusColor = CommonColors.GREEN;
+    }
+
+    private void saveLayoutAsDefault() {
+        ModConfig config = FileManager.getConfig();
+        FileManager.updateConfig(config.withCardLayout(layout));
+        // a deck with sizes of its own keeps them, so say so rather than let "default" look broken later
+        boolean deckHasOwn = !DeckSettings.forDeck(FileManager.getConfig(), card.deckName()).layout().equals(layout);
+        layoutStatus = deckHasOwn ? "Saved as default (this deck has its own)" : "Saved as the default";
+        layoutStatusColor = deckHasOwn ? CommonColors.SOFT_YELLOW : CommonColors.GREEN;
+    }
+
+    private void extractPopoverBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+        Font font = Minecraft.getInstance().font;
+        graphics.fill(popoverX, popoverY, popoverX + POPOVER_WIDTH, popoverY + popoverHeight, 0xF00E0F14);
+        graphics.outline(popoverX, popoverY, POPOVER_WIDTH, popoverHeight, 0x60FFFFFF);
+        String status = layoutStatus.isEmpty() ? "Applies to this card until you save" : layoutStatus;
+        int color = layoutStatus.isEmpty() ? 0xFF777C88 : layoutStatusColor;
+        graphics.text(font, status, popoverX + (POPOVER_WIDTH - font.width(status)) / 2, popoverY + popoverHeight - font.lineHeight - 3, color, false);
+    }
+
+    private boolean overPopover(double x, double y) {
+        return layoutOpen && x >= popoverX && x < popoverX + POPOVER_WIDTH && y >= popoverY && y < popoverY + popoverHeight;
+    }
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (super.mouseClicked(event, doubleClick)) return true;
+        return overPopover(event.x(), event.y()); // a click on the panel itself mustn't reach the card under it
     }
 
     private void placeRow(int y, int availableWidth, List<Button> buttons, int maxWidth) {
@@ -525,7 +730,7 @@ public class AnkiQuestionScreen extends Screen {
         long lockLeft = inputLockRemainingMillis();
         if (lockLeft > 150) { // tell the player why the keyboard isn't responding yet (the mouse always works)
             String hint = "keys unlock in " + String.format(Locale.ROOT, "%.1f", lockLeft / 1000.0) + "s";
-            graphics.text(Minecraft.getInstance().font, hint, cardView.getRight() - Minecraft.getInstance().font.width(hint),
+            graphics.text(Minecraft.getInstance().font, hint, questionView.getRight() - 22 - Minecraft.getInstance().font.width(hint),
                     (HEADER_HEIGHT - 9) / 2, 0xFF777C88, false);
         }
 
@@ -559,6 +764,17 @@ public class AnkiQuestionScreen extends Screen {
         if (phase == Phase.GRADING && !quitShown && gradingElapsedMillis() >= ai.quitAfterSeconds() * 1000L) {
             quitShown = true;
             rebuildWidgets();
+        }
+        if (needsRelayout) {
+            needsRelayout = false;
+            // keep hold of the slider being dragged: rebuilding would otherwise let go of it mid-drag
+            GuiEventListener focused = getFocused();
+            boolean dragging = isDragging();
+            rebuildWidgets();
+            if (focused != null && children().contains(focused)) {
+                setFocused(focused);
+                setDragging(dragging);
+            }
         }
     }
 
@@ -601,7 +817,6 @@ public class AnkiQuestionScreen extends Screen {
         if (screen == null || screen.phase == Phase.GRADING || screen.secondsUntilReturn() > 0) return;
         if (minecraft.player == null || minecraft.gui.screen() != null || QuestionScheduler.wasPlayerHurtRecently()) return;
         background = null;
-        screen.scrollAfterInit = true;
         screen.lockInput(true); // the player is in the middle of playing: same protection as a new card
         minecraft.gui.setScreen(screen);
     }
@@ -619,20 +834,8 @@ public class AnkiQuestionScreen extends Screen {
         if (background == this) return; // not on screen: tickBackground reopens it, and init lays it out then
         lockInput(false);
         setFocused(null);
+        answerView.setScrollAmount(0); // whatever comes next is read from its top
         rebuildWidgets();
-        scrollForPhase();
-    }
-
-    private void scrollForPhase() {
-        if (phase == Phase.REVEALED || phase == Phase.GAVE_UP || phase == Phase.GRADED) jumpToAnswer();
-        if (phase == Phase.SECOND_CHANCE || phase == Phase.GRADING) cardView.setScrollAmount(cardView.maxScrollAmount());
-    }
-
-    /** Long card: jump to the answer if it starts below the middle of the panel (scrolling up shows the rest again). */
-    private void jumpToAnswer() {
-        if (cardView.maxScrollAmount() > 0 && cardView.blockTop(answerBlockIndex) > cardView.getHeight() / 2) {
-            cardView.scrollToBlock(answerBlockIndex);
-        }
     }
 
     private void reveal() {
@@ -707,7 +910,8 @@ public class AnkiQuestionScreen extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
         if (super.mouseScrolled(mouseX, mouseY, scrollX, scrollY)) return true;
-        cardView.scrollBy(-scrollY * Minecraft.getInstance().font.lineHeight * 2); // scroll the card from anywhere on screen
+        if (overPopover(mouseX, mouseY)) return true;
+        scrollTarget().scrollBy(-scrollY * Minecraft.getInstance().font.lineHeight * 2); // scroll the card from anywhere on screen
         return true;
     }
 
@@ -732,8 +936,8 @@ public class AnkiQuestionScreen extends Screen {
                 return true;
             }
             switch (key) {
-                case InputConstants.KEY_PAGEUP -> { cardView.scrollBy(-cardView.pageHeight()); return true; }
-                case InputConstants.KEY_PAGEDOWN -> { cardView.scrollBy(cardView.pageHeight()); return true; }
+                case InputConstants.KEY_PAGEUP -> { scrollTarget().scrollBy(-scrollTarget().pageHeight()); return true; }
+                case InputConstants.KEY_PAGEDOWN -> { scrollTarget().scrollBy(scrollTarget().pageHeight()); return true; }
                 default -> { return super.keyPressed(event); } // everything else is typing
             }
         }
@@ -741,12 +945,12 @@ public class AnkiQuestionScreen extends Screen {
         boolean sliderFocused = scoreSlider != null && getFocused() == scoreSlider;
         int line = Minecraft.getInstance().font.lineHeight;
         switch (key) {
-            case InputConstants.KEY_UP -> { cardView.scrollBy(-line * 2); return true; }
-            case InputConstants.KEY_DOWN -> { cardView.scrollBy(line * 2); return true; }
-            case InputConstants.KEY_PAGEUP -> { cardView.scrollBy(-cardView.pageHeight()); return true; }
-            case InputConstants.KEY_PAGEDOWN -> { cardView.scrollBy(cardView.pageHeight()); return true; }
-            case InputConstants.KEY_HOME -> { cardView.setScrollAmount(0); return true; }
-            case InputConstants.KEY_END -> { cardView.setScrollAmount(cardView.maxScrollAmount()); return true; }
+            case InputConstants.KEY_UP -> { scrollTarget().scrollBy(-line * 2); return true; }
+            case InputConstants.KEY_DOWN -> { scrollTarget().scrollBy(line * 2); return true; }
+            case InputConstants.KEY_PAGEUP -> { scrollTarget().scrollBy(-scrollTarget().pageHeight()); return true; }
+            case InputConstants.KEY_PAGEDOWN -> { scrollTarget().scrollBy(scrollTarget().pageHeight()); return true; }
+            case InputConstants.KEY_HOME -> { scrollTarget().setScrollAmount(0); return true; }
+            case InputConstants.KEY_END -> { scrollTarget().setScrollAmount(scrollTarget().maxScrollAmount()); return true; }
             default -> {}
         }
 

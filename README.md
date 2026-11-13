@@ -12,7 +12,7 @@ By [**IvanIvanochko**](https://github.com/IvanIvanochko). A fork of [Flashcards]
 - **Editable AI prompt**: read or rewrite the whole set of instructions the AI grades by.
 - **AI memory controls**: profiles and sliders for how much RAM the AI may use and how long the model stays loaded, with a live picture of your computer's memory.
 - **Rewards & penalties**: optional commands for right and wrong answers, with presets from "Gentle" to "Learn or Die" that you can edit.
-- **Readable cards**: normal-size text in a scrollable panel, images, and LaTeX/MathJax formulas converted to Unicode.
+- **Readable cards**: normal-size text, every picture shown where it is on the card (click one for a zoomable full-screen view), and LaTeX/MathJax formulas converted to Unicode. The question and the answer each have their own scrolling area, and you choose how big things get, per deck if you like.
 - **Timer & stats HUD**: countdown to the next card, session stats, Anki's due counts. Drag it anywhere and resize it.
 - **Card keys you can change**, and protection against stray key presses: a card that pops up while you're running and jumping can't be skipped by the Space you were already pressing.
 - **Real time or game time** for the question timer, and intervals in minutes **and seconds**.
@@ -28,10 +28,10 @@ Open the config with `H` (or through Mod Menu). The main screen has the question
 | **Edit Questions** / **Open Folder** | the mod's own question lists (used when Anki mode is off) and its files |
 | **Anki Sync...** | turn Anki mode on, pick your deck, AnkiWeb sync |
 | **AI Grading...** | turn AI grading on, pick the model, score cut-offs, "keep playing" settings, **AI prompt...**, **Memory & performance...** |
-| **Deck Presets...** | per-deck AI model, notes for the AI (and, advanced, a whole prompt), rewards and time between cards |
+| **Deck Presets...** | per-deck AI model, notes for the AI (and, advanced, a whole prompt), rewards, time between cards and card size |
 | **Rewards & Penalties...** | commands for right and wrong answers, with presets |
 | **HUD Layout...** | move and resize the study panel and the AI thinking indicator |
-| **General...** | answer checking for the mod's own questions, real time / game time, HUD on/off, **Card Keys...** |
+| **General...** | answer checking for the mod's own questions, real time / game time, HUD on/off, **Card Size...**, **Card Keys...** |
 | **Stats** | your all-time totals |
 
 All settings are saved in `config/flashcards/config.json`, so they survive restarts.
@@ -56,12 +56,31 @@ Everything runs on your computer. The mod only talks to Anki (AnkiConnect, `127.
 
 How it works:
 - Cards come from Anki's own review queue for that deck, so daily limits, learning steps and new cards behave exactly as in Anki.
-- The card is shown at normal text size in a panel that scrolls when it's long (mouse wheel, arrow keys, Page Up/Down, Home/End). When you reveal the answer of a long card, it jumps to the answer; scroll up to see the question again.
+- The card is shown at normal text size. The **question** has its own area: it grows to fit the question and scrolls when the screen runs out. The **answer** (and, with AI grading, your answer and the grade) appears in a second area below it, which grows only up to a limit you set and then scrolls on its own, so a long answer never pushes the question off the screen. Scroll with the mouse wheel over either area, or with the arrow keys, Page Up/Down, Home/End. See [Card size and pictures](#card-size-and-pictures).
 - After **Show Answer** you grade with **Again / Hard / Good / Easy**, each showing Anki's next interval. Keys: Space/Enter shows the answer, 1-4 grades, Space/Enter = Good (all changeable, see [Card keys](#card-keys)).
 - **Again** counts as a wrong answer for [rewards and penalties](#rewards-and-penalties), the other buttons count as correct.
 - With **Sync with AnkiWeb on join/leave** ON, Anki syncs with AnkiWeb when you join and leave a world (you must be logged in to AnkiWeb inside Anki).
 - Question screens pause the game in singleplayer.
-- Images on the card are copied from Anki into `config/flashcards/media/anki/`. Audio isn't played.
+- **All pictures** on a card are shown, in the place they have on the card, between the text. They're copied from Anki into `config/flashcards/media/anki/`. A picture in a format Minecraft can't draw (SVG, WebP) is replaced by a short note naming it. Audio isn't played.
+
+### Card size and pictures
+**Pictures** are shown at their natural size, scaled down only when they'd be wider than the card or taller than the limit below. **Click a picture** to open it nearly full screen:
+- scroll (or `+` / `-`) zooms in and out around the mouse, dragging moves the picture, the arrow keys move it too,
+- **Fit** (key `0`) shows the whole picture, **1:1** (key `1`) shows it at its real size, one picture pixel per screen pixel, which is the sharpest view; double-click switches between the two,
+- **Close** or Esc returns to the card exactly as you left it (what you typed is kept).
+
+**Sizes.** Three settings, each a percentage of the screen, so they hold at any window size:
+
+| Setting | What it limits | Default |
+|---|---|---|
+| **Answer area** | how much of the screen's height the answer area may take before it scrolls on its own; the question gets the rest | 45% |
+| **Pictures** | how tall a picture may be on the card | 40% |
+| **Card width** | how wide the card is | 95% |
+
+Where to change them:
+- **On a card:** click the **cog** (⚙) in the card's top-right corner. The three sliders change the card you're looking at immediately. Then **This deck** keeps the sizes for that card's deck, **Default** keeps them for every deck without sizes of its own, and **Close** just closes the panel (unsaved sizes apply to that one card).
+- **General... → Card Size...** for the default sizes.
+- **Deck Presets... → Card size** for one deck, e.g. bigger pictures for a deck of diagrams.
 
 ### Math / LaTeX
 Nothing to install. MathJax formulas (`\(...\)`, `\[...\]`, `$$...$$`) are converted to Unicode text that Minecraft's font can draw, for example:
@@ -187,6 +206,7 @@ Flashcards config → **Deck Presets...** Pick a deck on the left and give it it
 - **AI deck notes**: a few sentences about the deck for the grading AI, with helpers that write them for you, see [Deck notes](#deck-notes). Replacing the whole prompt for a deck is in there too, as an advanced option.
 - **Rewards**: its own rewards and penalties, from the same presets as the main ones, or *Same as main*.
 - **Time between cards**: click to switch from *Default* to *Own*, then type the minutes and seconds. E.g. every 2 minutes for a deck you're cramming, every 10 for one you only maintain.
+- **Card size**: its own limits for the answer area, pictures and card width, see [Card size and pictures](#card-size-and-pictures). The cog on a card of that deck sets the same thing.
 
 A blue dot marks decks that have a preset. How presets apply:
 - The preset of the deck the **card** is in is used, so when you study a parent deck, each subdeck's cards follow that subdeck's preset.
