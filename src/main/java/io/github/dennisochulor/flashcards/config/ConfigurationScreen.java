@@ -38,10 +38,14 @@ public class ConfigurationScreen extends Screen {
     private final Button doneButton = Button.builder(Component.literal("Done"), _ -> this.onClose()).build();
     private final Button generalConfigButton = Button.builder(Component.literal("General..."),_ -> Minecraft.getInstance().gui.setScreen(new GeneralConfigScreen()))
             .tooltip(Tooltip.create(Component.literal("Answer checking, real time or game time, HUD on/off, card keys"))).build();
-    private final Button rewardsButton = Button.builder(Component.literal("Rewards & Penalties..."), _ -> Minecraft.getInstance().gui.setScreen(RewardsConfigScreen.forMain()))
-            .tooltip(Tooltip.create(Component.literal("Optional: commands that run when you answer right or wrong, with presets"))).build();
+    private final Button rewardsButton = Button.builder(Component.literal("Rewards & Penalties..."), _ -> Minecraft.getInstance().gui.setScreen(new ProgressionScreen(null)))
+            .tooltip(Tooltip.create(Component.literal(
+                    "Optional: a score per deck that goes up and down with your grades, and commands (rewards or punishments) "
+                    + "that run on each grade or at certain scores. Presets included."))).build();
+    private final Button helpButton = Button.builder(Component.literal("Help..."), _ -> Minecraft.getInstance().gui.setScreen(new HelpScreen()))
+            .tooltip(Tooltip.create(Component.literal("How everything in this mod works, with buttons that take you to each setting"))).build();
     private final Button deckPresetsButton = Button.builder(Component.literal("Deck Presets..."), _ -> Minecraft.getInstance().gui.setScreen(new DeckPresetsScreen()))
-            .tooltip(Tooltip.create(Component.literal("Give each Anki deck its own AI model, grading prompt and rewards"))).build();
+            .tooltip(Tooltip.create(Component.literal("Give each Anki deck its own AI model, notes for the AI, time between cards, card size, auto-grading and rewards"))).build();
     private final Button hudLayoutButton = Button.builder(Component.literal("HUD Layout..."), _ -> Minecraft.getInstance().gui.setScreen(new HudLayoutScreen()))
             .tooltip(Tooltip.create(Component.literal("Move and resize the study panel, the AI thinking indicator and the AI result panel"))).build();
     private final Button ankiConfigButton = Button.builder(Component.literal("Anki Sync..."), _ -> Minecraft.getInstance().gui.setScreen(new AnkiConfigScreen()))
@@ -149,7 +153,8 @@ public class ConfigurationScreen extends Screen {
         hudLayoutButton.setRectangle(columnWidth,20,left,y);
         generalConfigButton.setRectangle(columnWidth,20,right,y);
         y += rowHeight;
-        statsButton.setRectangle(columnWidth,20,width/2 - columnWidth/2,y);
+        statsButton.setRectangle(columnWidth,20,left,y);
+        helpButton.setRectangle(columnWidth,20,right,y);
         doneButton.setRectangle(100,20,width/2 - 50,Math.max(y + rowHeight + 6, height - 30));
 
         addRenderableOnly(titleText);
@@ -168,6 +173,7 @@ public class ConfigurationScreen extends Screen {
         addRenderableWidget(hudLayoutButton);
         addRenderableWidget(generalConfigButton);
         addRenderableWidget(statsButton);
+        addRenderableWidget(helpButton);
         addRenderableWidget(doneButton);
     }
 

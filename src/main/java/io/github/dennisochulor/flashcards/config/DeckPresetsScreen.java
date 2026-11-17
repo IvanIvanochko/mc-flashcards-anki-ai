@@ -6,6 +6,7 @@ import io.github.dennisochulor.flashcards.ai.GradingPrompt;
 import io.github.dennisochulor.flashcards.ai.Ollama;
 import io.github.dennisochulor.flashcards.anki.AnkiSession;
 import io.github.dennisochulor.flashcards.questions.QuestionScheduler;
+import io.github.dennisochulor.flashcards.progress.Progression;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -31,22 +32,19 @@ import java.util.TreeSet;
  */
 class DeckPresetsScreen extends Screen {
     private static final int GRAY = 0xFFAAAAAA;
-    private static final RewardsConfigScreen.Rewards NO_REWARDS =
-            new RewardsConfigScreen.Rewards(List.of(), List.of(), ModConfig.CommandSelectionStrategy.EXECUTE_ALL, "");
 
     /** One deck's preset while it's being edited. */
     private static final class Draft {
         String model = "";
         String prompt = ""; // advanced: replaces the whole prompt
         String notes = "";  // the usual way: a few sentences added to the prompt
-        boolean customRewards = false;
-        RewardsConfigScreen.Rewards rewards = NO_REWARDS;
+        Progression.@Nullable Setup progression = null; // edited in the Rewards & Penalties screen, which saves it itself
         int intervalSeconds = 0; // 0 = default
         ModConfig.@Nullable CardLayout layout = null; // null = default sizes
         ModConfig.@Nullable AutoGrades autoGrades = null; // null = the main setting
 
         boolean isDefault() {
-            return model.isBlank() && prompt.isBlank() && notes.isBlank() && !customRewards && intervalSeconds == 0 && layout == null && autoGrades == null;
+            return model.isBlank() && prompt.isBlank() && notes.isBlank() && progression == null && intervalSeconds == 0 && layout == null && autoGrades == null;
         }
     }
 
@@ -72,7 +70,10 @@ class DeckPresetsScreen extends Screen {
                     + "You don't have to write them yourself: there's a guided form, a ready-made request for any AI, and your local AI can write them.\n"
                     + "(Replacing the whole grading prompt for this deck is in there too, as an advanced option.)"))).build();
     private final Button rewardsButton = Button.builder(Component.empty(), _ -> openRewards())
-            .tooltip(Tooltip.create(Component.literal("Give this deck its own rewards and penalties"))).build();
+            .tooltip(Tooltip.create(Component.literal(
+                    "Open Rewards & Penalties with this deck selected: its score, and whether it follows the main setup "
+                    + "(Default) or has its own points, rules and commands. Done there brings you back here."))).build();
+    private boolean rewardsOpen = false;
     private final Button timeButton = Button.builder(Component.empty(), _ -> {
         Draft draft = draft();
         draft.intervalSeconds = draft.intervalSeconds > 0 ? 0 : inheritedInterval(); // Default <-> Own, starting from the current time
@@ -115,8 +116,7 @@ class DeckPresetsScreen extends Screen {
             Draft draft = new Draft();
             draft.model = profile.model();
             draft.prompt = profile.prompt();
-            draft.customRewards = profile.customRewards();
-            draft.rewards = new RewardsConfigScreen.Rewards(profile.correctCommands(), profile.wrongCommands(), profile.strategy(), profile.rewardPreset());
+            draft.progression = profile.progression();
             draft.intervalSeconds = profile.intervalSeconds();
             draft.notes = profile.notes();
             draft.layout = profile.layout();
@@ -279,13 +279,20 @@ class DeckPresetsScreen extends Screen {
                 inherited[0], inherited[1], text -> draft.prompt = text));
     }
 
+    /** Rewards & Penalties with this deck preselected. It saves on its own; coming back, the drafts pick up what it saved. */
     private void openRewards() {
-        Draft draft = draft();
-        Minecraft.getInstance().gui.setScreen(RewardsConfigScreen.forDeck(shortName(selected), !draft.customRewards, draft.rewards,
-                (sameAsMain, rewards) -> {
-                    draft.customRewards = !sameAsMain;
-                    draft.rewards = sameAsMain ? NO_REWARDS : rewards;
-                }));
+        rewardsOpen = true;
+        Minecraft.getInstance().gui.setScreen(new ProgressionScreen(selected));
+    }
+
+    /** Takes every deck's rewards setup from the saved config (after the Rewards & Penalties screen saved it). */
+    private void syncProgression() {
+        Map<String, Progression.Setup> saved = new java.util.HashMap<>();
+        for (ModConfig.DeckProfile profile : FileManager.getConfig().deckProfiles()) {
+            if (profile.progression() != null) saved.put(profile.deck(), profile.progression());
+        }
+        drafts.forEach((deck, draft) -> draft.progression = saved.remove(deck));
+        saved.forEach((deck, setup) -> drafts.computeIfAbsent(deck, _ -> new Draft()).progression = setup);
     }
 
     private void openModelPicker() {
@@ -306,6 +313,10 @@ class DeckPresetsScreen extends Screen {
     @Override
     protected void init() {
         doneButton.setTooltip(Tooltip.create(Component.literal("Save all deck presets and go back")));
+        if (rewardsOpen) { // back from Rewards & Penalties, which saved its changes already
+            rewardsOpen = false;
+            syncProgression();
+        }
         initialized = true;
         int gap = 10;
         int column = Math.max(150, Math.min(240, (width - 20 - gap) / 2));
@@ -362,8 +373,9 @@ class DeckPresetsScreen extends Screen {
         addRenderableWidget(notesButton);
         y += 24;
 
-        String rewards = !draft.customRewards ? "Same as main" : draft.rewards.presetName().isBlank() ? "Custom" : draft.rewards.presetName();
-        rewardsButton.setMessage(Component.literal("Rewards: " + rewards));
+        String rewards = draft.progression == null ? "Default"
+                : "Own (" + (draft.progression.presetName().isBlank() ? "custom" : draft.progression.presetName()) + ")";
+        rewardsButton.setMessage(Component.literal("Rewards & Penalties: " + rewards + "..."));
         rewardsButton.setRectangle(column, 20, rightX, y);
         addRenderableWidget(rewardsButton);
         y += 24;
@@ -444,8 +456,9 @@ class DeckPresetsScreen extends Screen {
         List<ModConfig.DeckProfile> profiles = new ArrayList<>();
         drafts.forEach((deck, draft) -> {
             if (deck.isBlank() || draft.isDefault()) return;
-            profiles.add(new ModConfig.DeckProfile(deck, draft.model, draft.prompt, draft.customRewards, draft.rewards.presetName(),
-                    draft.rewards.correct(), draft.rewards.wrong(), draft.rewards.strategy(), draft.intervalSeconds, draft.notes, draft.layout, draft.autoGrades));
+            profiles.add(new ModConfig.DeckProfile(deck, draft.model, draft.prompt, false, "", List.of(), List.of(),
+                    ModConfig.CommandSelectionStrategy.EXECUTE_ALL, draft.intervalSeconds, draft.notes, draft.layout, draft.autoGrades,
+                    draft.progression));
         });
         FileManager.updateConfig(FileManager.getConfig().withDeckProfiles(profiles));
         QuestionScheduler.deckPresetsChanged(); // a running countdown follows a changed time straight away

@@ -139,10 +139,19 @@ public final class AnkiSession {
         List<AnkiCard.Part> answerParts = toCardParts(anki, answer.parts());
         if (questionParts.isEmpty()) questionParts = List.of(new AnkiCard.Part("(empty card front)", ""));
 
+        long lastReview;
+        try {
+            lastReview = anki.lastReviewMillis(current.cardId());
+        }
+        catch (AnkiConnect.AnkiException | RuntimeException e) { // an older AnkiConnect, say: the card just counts as new
+            Flashcards.LOGGER.debug("Couldn't read when card {} was last reviewed", current.cardId(), e);
+            lastReview = -1;
+        }
+
         return new AnkiCard(current.cardId(), current.deckName(), question.text(), answer.text(),
                 current.buttons(), current.nextReviews(),
                 AnkiHtml.plainForAi(current.questionHtml()), AnkiHtml.plainForAi(AnkiHtml.answerOnly(current.answerHtml())),
-                questionParts, answerParts);
+                questionParts, answerParts, lastReview);
     }
 
     /**

@@ -12,6 +12,8 @@ import io.github.dennisochulor.flashcards.anki.AnkiCard;
 import io.github.dennisochulor.flashcards.anki.AnkiSession;
 import io.github.dennisochulor.flashcards.config.DeckSettings;
 import io.github.dennisochulor.flashcards.config.ModConfig;
+import io.github.dennisochulor.flashcards.progress.ProgressStore;
+import io.github.dennisochulor.flashcards.progress.Progression;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -546,6 +548,7 @@ public class AnkiQuestionScreen extends Screen {
         boolean typing = isTyping();
         boolean slider = phase == Phase.GRADED && ai.adjustScore();
         int bottomBlock = (phase == Phase.GRADING ? ThinkingAnimation.height(font) + 4 : BUTTON_HEIGHT)
+                + (showScorePreview() ? font.lineHeight + 4 : 0)
                 + (typing ? ANSWER_BOX_HEIGHT + 6 : 0) + (slider ? BUTTON_HEIGHT + 4 : 0);
         int available = height - HEADER_HEIGHT - 8 - bottomBlock - 8;
 
@@ -786,8 +789,54 @@ public class AnkiQuestionScreen extends Screen {
                 int alpha = button.active ? 0xE0 : 0x40;
                 graphics.fill(button.getX() + 1, button.getBottom() + 1, button.getRight() - 1, button.getBottom() + 3,
                         (alpha << 24) | (color & 0x00FFFFFF));
+                if (showScorePreview()) extractScorePreview(graphics, button, i);
             }
         }
+        if (FileManager.getConfig().scoreDisplay().card()) extractScore(graphics);
+    }
+
+    // ---------------------------------------------------------------- score (rewards & penalties)
+
+    /** What each grade would do to the score, worked out once per card (the score doesn't move while it's open). */
+    private Progression.@Nullable Result[] previews = null;
+
+    private boolean showScorePreview() {
+        return FileManager.getConfig().scoreDisplay().card() && (phase == Phase.REVEALED || phase == Phase.GRADED || phase == Phase.GAVE_UP);
+    }
+
+    private Progression.Result preview(int index) {
+        if (previews == null) previews = new Progression.Result[gradeButtons.size()];
+        Progression.Result result = previews[index];
+        if (result == null) {
+            result = AnswerOutcome.preview(nameToEase4(gradeNames.get(index)), card.deckName(), card.lastReviewMillis());
+            previews[index] = result;
+        }
+        return result;
+    }
+
+    /** Under a grade button: "→ -5 Weakened", what picking it would do. */
+    private void extractScorePreview(GuiGraphicsExtractor graphics, Button button, int index) {
+        Font font = Minecraft.getInstance().font;
+        Progression.Result result = preview(index);
+        boolean changes = Math.abs(result.after() - result.before()) > 1e-9;
+        List<String> names = result.fired().stream().map(Progression.Fired::name).filter(n -> !n.isBlank()).toList();
+        if (!changes && names.isEmpty()) return;
+        String text = "→ " + Progression.formatScore(result.after()) + (names.isEmpty() ? "" : " " + String.join(", ", names));
+        int color = result.after() < result.before() ? 0xFFFF9090 : result.after() > result.before() ? 0xFF8FE0A0 : 0xFFCCCCCC;
+        if (!button.active) color = 0x80AAAAAA; // a locked grade: show it, but quietly
+        String shown = font.plainSubstrByWidth(text, button.getWidth() - 2);
+        if (shown.length() < text.length()) shown = font.plainSubstrByWidth(text, button.getWidth() - 2 - font.width("…")) + "…";
+        graphics.text(font, shown, button.getX() + (button.getWidth() - font.width(shown)) / 2, button.getBottom() + 5, color, true);
+    }
+
+    /** The deck's current score, in the card's top-left corner. */
+    private void extractScore(GuiGraphicsExtractor graphics) {
+        Font font = Minecraft.getInstance().font;
+        String key = AnswerOutcome.scoreKey(card.deckName());
+        Progression.Setup setup = settings.progression();
+        double current = ProgressStore.get(key).fadedTo(System.currentTimeMillis(), setup.fadeHalfLifeHours()).score();
+        String text = "Score " + Progression.formatScore(current);
+        graphics.text(font, text, questionView.getX(), (HEADER_HEIGHT - 9) / 2, 0xFFAAAAAA, true);
     }
 
     private void extractThinking(GuiGraphicsExtractor graphics) {
@@ -880,13 +929,16 @@ public class AnkiQuestionScreen extends Screen {
         int ease = gradeEases.get(index);
         String name = gradeNames.get(index);
         if (!submit(ease)) return;
+        Progression.Result result = AnswerOutcome.apply(nameToEase4(name), card.deckName(), card.lastReviewMillis());
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player != null) {
-            minecraft.player.sendOverlayMessage(Component.literal("Auto-graded ").withColor(GRAY)
+            MutableComponent message = Component.literal("Auto-graded ").withColor(GRAY)
                     .append(Component.literal(name).withColor(buttonColor(name)))
-                    .append(Component.literal("  (" + format(score) + ")").withColor(GRAY)));
+                    .append(Component.literal("  (" + format(score) + ")").withColor(GRAY));
+            Component scoreText = AnswerOutcome.describe(result);
+            if (scoreText != null && FileManager.getConfig().scoreDisplay().card()) message.append(Component.literal("  ·  ").withColor(GRAY)).append(scoreText);
+            minecraft.player.sendOverlayMessage(message);
         }
-        AnswerOutcome.runCommands(ease != AGAIN, card.deckName());
     }
 
     /**
@@ -1077,7 +1129,8 @@ public class AnkiQuestionScreen extends Screen {
     private void grade(int ease) {
         if (!submit(ease)) return;
         this.onClose();
-        AnswerOutcome.runCommands(ease != AGAIN, card.deckName());
+        int ease4 = nameToEase4(gradeNames.get(gradeEases.indexOf(ease)));
+        AnswerOutcome.showInActionBar(ease4, AnswerOutcome.apply(ease4, card.deckName(), card.lastReviewMillis()));
     }
 
     /**

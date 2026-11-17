@@ -7,11 +7,12 @@ By [**IvanIvanochko**](https://github.com/IvanIvanochko). A fork of [Flashcards]
 - **Anki mode**: cards come from your real Anki deck and your answers are saved as real Anki reviews (Again / Hard / Good / Easy), so your spaced-repetition schedule keeps working while you play. Optional AnkiWeb sync on join/leave.
 - **AI grading**: type your answer and a local AI grades it by meaning, with a key-point checklist, a score meter and an explanation. The score unlocks Anki's buttons. One second chance for answers that are on the right track but too vague.
 - **Play while the AI thinks**: leave a slow grading with Space and keep playing. When the AI is done, its grade shows on the HUD and, if it's good enough, is applied on its own after a short countdown (auto-grading); otherwise the card comes back so you see what you missed.
-- **Deck presets**: each Anki deck can have its own AI model, notes for the AI, rewards and time between cards.
+- **Deck presets**: each Anki deck can have its own AI model, notes for the AI, rewards & penalties, time between cards, card size and auto-grading.
 - **Deck notes without prompt-writing**: tell the AI about a deck in a few sentences, with a guided form, a ready-made request for any AI, or your local AI writing them for you.
 - **Editable AI prompt**: read or rewrite the whole set of instructions the AI grades by.
 - **AI memory controls**: profiles and sliders for how much RAM the AI may use and how long the model stays loaded, with a live picture of your computer's memory.
-- **Rewards & penalties**: optional commands for right and wrong answers, with presets from "Gentle" to "Learn or Die" that you can edit.
+- **Rewards & penalties that escalate**: every deck has a score that your grades move up and down. Each grade (Again, Hard, Good, Easy) has its own points and its own rules ("at score -5 or lower: weakness", "every 5th Good: a diamond"), worth more for cards you haven't seen in a while, fading over time. Built-in presets, your own presets, and copy/paste to share them.
+- **Help inside the game**: H → **Help...** explains every feature, with buttons straight to its settings.
 - **Readable cards**: normal-size text, every picture shown where it is on the card (click one for a zoomable full-screen view), and LaTeX/MathJax formulas converted to Unicode. The question and the answer each have their own scrolling area, and you choose how big things get, per deck if you like.
 - **Timer & stats HUD**: countdown to the next card, session stats, Anki's due counts. Drag it anywhere and resize it.
 - **Card keys you can change**, and protection against stray key presses: a card that pops up while you're running and jumping can't be skipped by the Space you were already pressing.
@@ -28,11 +29,11 @@ Open the config with `H` (or through Mod Menu). The main screen has the question
 | **Edit Questions** / **Open Folder** | the mod's own question lists (used when Anki mode is off) and its files |
 | **Anki Sync...** | turn Anki mode on, pick your deck, AnkiWeb sync |
 | **AI Grading...** | turn AI grading on, pick the model, score cut-offs, "keep playing" settings, **AI prompt...**, **Memory & performance...** |
-| **Deck Presets...** | per-deck AI model, notes for the AI (and, advanced, a whole prompt), rewards, time between cards and card size |
-| **Rewards & Penalties...** | commands for right and wrong answers, with presets |
-| **HUD Layout...** | move and resize the study panel and the AI thinking indicator |
+| **Deck Presets...** | per-deck AI model, notes for the AI (and, advanced, a whole prompt), rewards & penalties, time between cards, card size, auto-grading |
+| **Rewards & Penalties...** | the score per deck: points and rules for each grade, timing, fading, presets, where the score is shown |
+| **HUD Layout...** | move, resize and restyle the study panel, the AI thinking indicator and the AI result panel |
 | **General...** | answer checking for the mod's own questions, real time / game time, HUD on/off, **Card Size...**, **Card Keys...** |
-| **Stats** | your all-time totals |
+| **Stats** / **Help...** | your all-time totals / how everything works, in tabs, with buttons to each setting |
 
 All settings are saved in `config/flashcards/config.json`, so they survive restarts.
 
@@ -58,7 +59,7 @@ How it works:
 - Cards come from Anki's own review queue for that deck, so daily limits, learning steps and new cards behave exactly as in Anki.
 - The card is shown at normal text size. The **question** has its own area: it grows to fit the question and scrolls when the screen runs out. The **answer** (and, with AI grading, your answer and the grade) appears in a second area below it, which grows only up to a limit you set and then scrolls on its own, so a long answer never pushes the question off the screen. Scroll with the mouse wheel over either area, or with the arrow keys, Page Up/Down, Home/End. See [Card size and pictures](#card-size-and-pictures).
 - After **Show Answer** you grade with **Again / Hard / Good / Easy**, each showing Anki's next interval. Keys: Space/Enter shows the answer, 1-4 grades, Space/Enter = Good (all changeable, see [Card keys](#card-keys)).
-- **Again** counts as a wrong answer for [rewards and penalties](#rewards-and-penalties), the other buttons count as correct.
+- Each grade moves the deck's score and can run commands, see [Rewards and penalties](#rewards-and-penalties).
 - With **Sync with AnkiWeb on join/leave** ON, Anki syncs with AnkiWeb when you join and leave a world (you must be logged in to AnkiWeb inside Anki).
 - Question screens pause the game in singleplayer.
 - **All pictures** on a card are shown, in the place they have on the card, between the text. They're copied from Anki into `config/flashcards/media/anki/`. A picture in a format Minecraft can't draw (SVG, WebP) is replaced by a short note naming it. Audio isn't played.
@@ -231,7 +232,7 @@ If the game still stutters: a smaller model (`qwen2.5:3b`, `llama3.2:3b`) helps 
 Flashcards config → **Deck Presets...** Pick a deck on the left and give it its own:
 - **AI model**: opens a searchable list of your installed models, with the RAM each one needs. E.g. a bigger model for a hard subject, a small fast one for vocabulary.
 - **AI deck notes**: a few sentences about the deck for the grading AI, with helpers that write them for you, see [Deck notes](#deck-notes). Replacing the whole prompt for a deck is in there too, as an advanced option.
-- **Rewards**: its own rewards and penalties, from the same presets as the main ones, or *Same as main*.
+- **Rewards & Penalties**: opens the [rewards editor](#rewards-and-penalties) with this deck already selected; *Done* there brings you back. The button says *Default* (follows the parent deck, then the main setup) or *Own* (with the preset's name).
 - **Time between cards**: click to switch from *Default* to *Own*, then type the minutes and seconds. E.g. every 2 minutes for a deck you're cramming, every 10 for one you only maintain.
 - **Card size**: its own limits for the answer area, pictures and card width, see [Card size and pictures](#card-size-and-pictures). The cog on a card of that deck sets the same thing.
 - **Auto-grade**: which AI grades are applied on their own for this deck when it's graded while you play, see [Auto-grading](#auto-grading).
@@ -286,21 +287,55 @@ Other settings are in Flashcards config → **General...**:
 The interval itself is set on the main config screen: "Prompt a question every [N] min [N] sec" (at least 1 second in total). A deck can have its own time, see [Deck presets](#deck-presets).
 
 ## Rewards and penalties
-Optional. Flashcards config → **Rewards & Penalties...** lets commands run when you answer right (in Anki mode: Hard, Good or Easy) or wrong (Again).
+Optional. Flashcards config → **Rewards & Penalties...** (also from **Deck Presets**, with the deck preselected).
 
-Pick a **preset**, then change anything you like in the two command boxes (one command per line, no `/`); editing turns the preset into *Custom*, and your custom commands are kept while you browse the other presets.
+**The score.** Every deck and every subdeck has its own score, kept across restarts and worlds (`config/flashcards/progress.json`). Your own question lists share one score. Each grade changes it by its **points**, by default **Again −1, Hard 0, Good +1, Easy +2** (the mod's own questions: right = Good, wrong = Again).
 
-| Preset | Right answer | Wrong answer |
-|---|---|---|
-| **None** | nothing | nothing |
-| **Gentle** | 5 XP, 5 s of regeneration | 10 s of slowness |
-| **Balanced** | 10 XP, food, 30 s of speed | 20 s of hunger, 30 s of mining fatigue |
-| **Tough** | 15 XP, extra (absorption) hearts for a minute | 3 hearts of damage, weakness, darkness |
-| **Learn or Die** | 20 XP, regeneration, resistance | you die |
-| **Lucky Dip** | one random prize: iron, gold, a diamond, emeralds, a golden apple, XP bottles or XP | one random mishap: nausea, hunger, levitation, 2 hearts of damage, a lightning strike or a zombie |
+**Rules.** Each grade has a tab with its points and its own list of rules. A rule is a condition plus commands (one per line, no `/`). Whether a grade rewards or punishes depends only on the commands you give it.
 
-**Mode** decides how the boxes are used: *Execute All* runs every line, *Randomise One* picks one line at random (Lucky Dip uses this), *OFF* runs nothing.
+| Condition | Runs when (after the score has changed) |
+|---|---|
+| **always** | every time you give this grade |
+| **score ≥ X** / **score ≤ X** / **between A and B** | the deck's score is in that range |
+| **given N times** | you've given this grade at least N times |
+| **every Nth time** | the 5th, 10th, 15th ... time you give this grade |
 
+Options per rule:
+- **Once** (runs when the condition becomes true, and again only after it was false, e.g. you climbed back up) or **Every time** (every answer while it's true).
+- **Run all lines** or **One line at random**.
+- **Then set the score to X**, e.g. back to 0 after a big punishment, and **Restart the count** (for "given N times").
+- A name, shown when it fires ("Score −4 → −5 · Weakened").
+
+**If several rules of a grade hold at once** (score −6 with rules for −1 and −5), a switch per grade decides: **All that match** run (effects stack), or **Only the strongest** (the one with the furthest threshold).
+
+**Timing.** Points are multiplied by how long ago Anki last showed the card. Defaults: new card ×1, less than 1 hour ×0.5, up to 1 day ×1, up to 7 days ×1.5, longer ×2. Gains and losses have separate columns, and the hours are editable (**Timing...**).
+
+**Fading.** Optionally the score and the counts drift halfway back to 0 every 6 h, 12 h, 1 day, 3 days or 7 days while you don't answer, so a bad session yesterday doesn't count fully today.
+
+**Presets** (*Preset: ...* shows what each one does before you use it):
+
+| Preset | Idea |
+|---|---|
+| **Off** | nothing runs; the score still counts |
+| **Classic ladder** | slowness from −1; weakness, hunger and slow mining at −5; at −10 you die and the score goes back to 0. XP at +5, regeneration and extra hearts at +10, diamonds at +20 (back to 0). Fades over a day |
+| **Gentle coach** | rewards only: a little XP for every right answer, speed every 5th time, a golden apple at +10 |
+| **Strikes** | punishments only, counted per Again: slowness every time, hunger on the 3rd, weakness, darkness and damage on the 5th, death on the 7th (the count starts over). Fades over 12 hours |
+| **Treasure hunt** | rewards only, as loot: iron every 5th right answer, then gold, emeralds, a diamond and netherite scrap as the score climbs |
+| **Redemption** | mild both ways and quick to forgive (halves every 6 hours): slowness from −3, slow mining at −6; haste at +3, luck and XP at +6 |
+| **Gentle / Balanced / Tough / Learn or Die / Lucky Dip** | the simple flat sets: the same commands for every right or every wrong answer |
+
+**Save as mine** keeps the current setup as one of your presets (`config/flashcards/progression-presets.json`), for any deck. **Copy** puts it on the clipboard as text to share; **Paste** reads one and lists every command in it before you use or save it.
+
+**Per deck.** A deck follows its parent deck's setup, or the main one (*Default*), until you give it its own: copied from what it uses now, or from a preset. Its subdecks then follow it, unless they have their own. *Back to default* drops it again. The score is always the deck's own.
+
+**Where the score shows** (both switches are at the bottom of the editor):
+- **Score on HUD**: a row in the study panel, with the named rules another Again would set off.
+- **Score on cards**: in the card's corner, under each grade button (what that grade would do, e.g. "→ −5 Weakened"), and in the action bar after you grade (also after auto-grading).
+- The editor always shows each deck's score, its grade counts, and **Reset score**.
+
+Settings from older versions are moved over on their own: the old right-answer commands become an *always* rule on Hard, Good and Easy, the wrong-answer commands one on Again, per deck too.
+
+How the commands run:
 - **Singleplayer** (and when you host a LAN world): the commands are run by the world itself, so they work even if the world was created with cheats off, and they don't fill your chat. If a line isn't a valid command, you get a chat message saying which one.
 - **Multiplayer:** the commands are sent as you, so the server must allow you to run them (operator permission).
 - Commands run as you, at your position: `@s` is you and `~ ~ ~` is where you stand.

@@ -91,6 +91,16 @@ public final class FileManager {
         writeAsync(configFile, PRETTY_GSON.toJson(config, ModConfig.class));
     }
 
+    /** @return a file in the mod's config folder (config/flashcards/) */
+    public static File configFile(String name) {
+        return new File(dotMinecraftFolder + "/config/flashcards/" + name);
+    }
+
+    /** Writes a file in the mod's config folder in the background, like the config itself. */
+    public static void writeConfigAsync(String name, String json) {
+        writeAsync(configFile(name), json);
+    }
+
     /** Serialized on the calling thread (so the snapshot is consistent), written to disk in the background. */
     private static void writeAsync(File file, String json) {
         IO.execute(() -> {

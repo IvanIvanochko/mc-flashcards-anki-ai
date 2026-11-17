@@ -2,6 +2,8 @@ package io.github.dennisochulor.flashcards.config;
 
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
+import io.github.dennisochulor.flashcards.progress.Progression;
+import io.github.dennisochulor.flashcards.progress.ProgressionPresets;
 import org.jspecify.annotations.Nullable;
 
 import java.util.HashMap;
@@ -14,7 +16,7 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
                         TimerMode timerMode, Boolean hudEnabled, Placement hudPlacement, AiGrading aiGrading,
                         Integer intervalSeconds, Placement indicatorPlacement, String rewardPreset,
                         List<DeckProfile> deckProfiles, CardKeys cardKeys, CardLayout cardLayout, Placement resultPlacement,
-                        HudDetail hudDetail)
+                        HudDetail hudDetail, Progression.Setup progression, ScoreDisplay scoreDisplay)
 {
     public static final String DEFAULT_ANKI_CONNECT_URL = "http://127.0.0.1:8765";
 
@@ -309,11 +311,12 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
      *                      added to the grading prompt; "" = none. The usual way to tune grading for a deck.
      * @param layout        this deck's own card sizes, or null for the default ones
      * @param autoGrades    which grades are applied on their own for this deck, or null for the main setting
+     * @param progression   this deck's own rewards & penalties (score system), or null to follow the main / parent setup
      */
     public record DeckProfile(String deck, String model, String prompt, Boolean customRewards, String rewardPreset,
                               List<String> correctCommands, List<String> wrongCommands, CommandSelectionStrategy strategy,
                               Integer intervalSeconds, String notes, @Nullable CardLayout layout,
-                              @Nullable AutoGrades autoGrades) {
+                              @Nullable AutoGrades autoGrades, Progression.@Nullable Setup progression) {
         @SuppressWarnings("ConstantValue")
         public DeckProfile {
             if (deck == null) deck = "";
@@ -326,25 +329,54 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
             if (strategy == null) strategy = CommandSelectionStrategy.EXECUTE_ALL;
             if (intervalSeconds == null || intervalSeconds < 0) intervalSeconds = 0;
             notes = notes == null ? "" : notes.strip();
+            if (progression == null && customRewards) { // a deck preset from before the score system: keep its rewards
+                progression = fromFlat(rewardPreset, correctCommands, wrongCommands, strategy);
+            }
+            customRewards = false; // the flat rewards now live in the score system
         }
 
         /** An otherwise untouched profile for a deck, e.g. to give it just one setting of its own. */
         public static DeckProfile empty(String deck) {
-            return new DeckProfile(deck, "", "", false, "", List.of(), List.of(), CommandSelectionStrategy.EXECUTE_ALL, 0, "", null, null);
+            return new DeckProfile(deck, "", "", false, "", List.of(), List.of(), CommandSelectionStrategy.EXECUTE_ALL, 0, "", null, null, null);
         }
 
         public DeckProfile withAutoGrades(@Nullable AutoGrades autoGrades) {
-            return new DeckProfile(deck, model, prompt, customRewards, rewardPreset, correctCommands, wrongCommands, strategy, intervalSeconds, notes, layout, autoGrades);
+            return new DeckProfile(deck, model, prompt, customRewards, rewardPreset, correctCommands, wrongCommands, strategy, intervalSeconds, notes, layout, autoGrades, progression);
+        }
+
+        public DeckProfile withProgression(Progression.@Nullable Setup progression) {
+            return new DeckProfile(deck, model, prompt, customRewards, rewardPreset, correctCommands, wrongCommands, strategy, intervalSeconds, notes, layout, autoGrades, progression);
         }
 
         public DeckProfile withLayout(@Nullable CardLayout layout) {
-            return new DeckProfile(deck, model, prompt, customRewards, rewardPreset, correctCommands, wrongCommands, strategy, intervalSeconds, notes, layout, autoGrades);
+            return new DeckProfile(deck, model, prompt, customRewards, rewardPreset, correctCommands, wrongCommands, strategy, intervalSeconds, notes, layout, autoGrades, progression);
         }
 
         /** Whether this profile changes nothing, i.e. doesn't need to be saved. */
         public boolean isDefault() {
-            return model.isBlank() && prompt.isBlank() && !customRewards && intervalSeconds == 0 && notes.isBlank() && layout == null && autoGrades == null;
+            return model.isBlank() && prompt.isBlank() && !customRewards && intervalSeconds == 0 && notes.isBlank() && layout == null && autoGrades == null && progression == null;
         }
+    }
+
+    /** Where the score is shown in game. (It's always shown in the Rewards & Penalties editor.) */
+    public record ScoreDisplay(Boolean hud, Boolean card) {
+        public static final ScoreDisplay DEFAULT = new ScoreDisplay(true, true);
+
+        @SuppressWarnings("ConstantValue")
+        public ScoreDisplay {
+            if (hud == null) hud = true;
+            if (card == null) card = true;
+        }
+    }
+
+    /** The older flat rewards (same commands for every right / wrong answer) as a score-system setup. */
+    static Progression.Setup fromFlat(@Nullable String presetName, @Nullable List<String> right, @Nullable List<String> wrong,
+                                      @Nullable CommandSelectionStrategy strategy) {
+        List<String> r = cleanCommands(right), w = cleanCommands(wrong);
+        if (strategy == CommandSelectionStrategy.OFF || (r.isEmpty() && w.isEmpty())) return Progression.Setup.empty();
+        Progression.Pick pick = strategy == CommandSelectionStrategy.RANDOMISE_ONE ? Progression.Pick.ONE_RANDOM : Progression.Pick.ALL;
+        String name = presetName == null || presetName.isBlank() ? "" : presetName;
+        return ProgressionPresets.fromFlat(name, r, w, pick);
     }
 
     /** Drops blank lines and a leading slash. */
@@ -456,8 +488,8 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
         if (interval < 0 || intervalSeconds < 0 || intervalSeconds > 59) throw new IllegalArgumentException("invalid interval!");
         if (interval == 0 && intervalSeconds == 0) throw new IllegalArgumentException("interval must be at least 1 second!");
         // null checks needed for when Gson deserializes
-        if (correctAnswerCommands == null) correctAnswerCommands = List.of();
-        if (wrongAnswerCommands == null) wrongAnswerCommands = List.of();
+        correctAnswerCommands = cleanCommands(correctAnswerCommands);
+        wrongAnswerCommands = cleanCommands(wrongAnswerCommands);
         if (validationToggle == null) validationToggle = true;
         if (commandSelectionStrategy == null) commandSelectionStrategy = CommandSelectionStrategy.EXECUTE_ALL;
         if (ankiMode == null) ankiMode = false;
@@ -470,14 +502,17 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
         if (indicatorPlacement == null) indicatorPlacement = Placement.DEFAULT_INDICATOR;
         if (resultPlacement == null) resultPlacement = indicatorPlacement; // starts where the thinking indicator is
         if (hudDetail == null) hudDetail = HudDetail.FULL;
+        if (progression == null) { // a config from before the score system: keep the rewards it had
+            progression = fromFlat(rewardPreset, correctAnswerCommands, wrongAnswerCommands, commandSelectionStrategy);
+        }
+        if (scoreDisplay == null) scoreDisplay = ScoreDisplay.DEFAULT;
         if (rewardPreset == null) rewardPreset = "";
         deckProfiles = deckProfiles == null ? List.of() : List.copyOf(deckProfiles);
         if (cardKeys == null) cardKeys = CardKeys.DEFAULT;
         if (cardLayout == null) cardLayout = CardLayout.DEFAULT;
         if (aiGrading == null) aiGrading = AiGrading.DEFAULT;
 
-        correctAnswerCommands = cleanCommands(correctAnswerCommands);
-        wrongAnswerCommands = cleanCommands(wrongAnswerCommands);
+        // (the old flat command lists are only read once, to move them into the score system above)
     }
 
     /** @return the time between questions, in seconds */
@@ -487,62 +522,72 @@ public record ModConfig(int interval, boolean intervalToggle, Boolean validation
 
     public ModConfig withInterval(int interval, int intervalSeconds, boolean intervalToggle) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     public ModConfig withValidationToggle(boolean validationToggle) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     public ModConfig withCategoryToggle(HashMap<String, Boolean> categoryToggle) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     /** @param rewardPreset name of the preset the commands came from, or "" when they were written by hand */
     public ModConfig withCommands(List<String> correctAnswerCommands, List<String> wrongAnswerCommands, CommandSelectionStrategy commandSelectionStrategy, String rewardPreset) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     public ModConfig withAnki(boolean ankiMode, String ankiDeck, String ankiConnectUrl, boolean ankiSync) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     public ModConfig withAiGrading(AiGrading aiGrading) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     public ModConfig withCardLayout(CardLayout cardLayout) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     public ModConfig withCardKeys(CardKeys cardKeys) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     public ModConfig withDeckProfiles(List<DeckProfile> deckProfiles) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
+    }
+
+    public ModConfig withProgression(Progression.Setup progression) {
+        return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
+    }
+
+    public ModConfig withScoreDisplay(ScoreDisplay scoreDisplay) {
+        return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     public ModConfig withHudDetail(HudDetail hudDetail) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     public ModConfig withPlacements(Placement hudPlacement, Placement indicatorPlacement, Placement resultPlacement) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 
     public ModConfig withTimerAndHud(TimerMode timerMode, boolean hudEnabled) {
         return new ModConfig(interval, intervalToggle, validationToggle, categoryToggle, correctAnswerCommands,
-                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail);
+                wrongAnswerCommands, commandSelectionStrategy, ankiMode, ankiDeck, ankiConnectUrl, ankiSync, timerMode, hudEnabled, hudPlacement, aiGrading, intervalSeconds, indicatorPlacement, rewardPreset, deckProfiles, cardKeys, cardLayout, resultPlacement, hudDetail, progression, scoreDisplay);
     }
 }

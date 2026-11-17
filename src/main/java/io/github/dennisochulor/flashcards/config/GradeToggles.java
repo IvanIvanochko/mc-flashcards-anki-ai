@@ -132,9 +132,71 @@ public final class GradeToggles {
     }
 
     /** Lays the four switches out in a row of the given width. @return the row's height, strips included */
-    public static int place(List<Toggle> toggles, int x, int y, int width) {
+    public static int place(List<? extends AbstractWidget> toggles, int x, int y, int width) {
         int each = (width - GAP * 3) / 4;
         for (int i = 0; i < 4; i++) toggles.get(i).setRectangle(each, 20, x + i * (each + GAP), y);
         return 20 + 3;
+    }
+
+    /**
+     * A grade's tab in the Rewards & Penalties editor: the selected one looks like a pressable button with a bright
+     * strip, the others like locked buttons with a faint strip (but they're clickable, of course).
+     */
+    public static final class Tab extends AbstractWidget {
+        private final int index;
+        private final java.util.function.IntConsumer onSelect;
+        private boolean selected;
+        private String detail = "";
+
+        public Tab(int index, boolean selected, java.util.function.IntConsumer onSelect) {
+            super(0, 0, 50, 20, Component.literal(NAMES[index]));
+            this.index = index;
+            this.selected = selected;
+            this.onSelect = onSelect;
+            setTooltip(Tooltip.create(Component.literal("What happens when you answer " + NAMES[index]
+                    + ": its points and its rules. Click to edit them.")));
+        }
+
+        public void setSelected(boolean selected) {
+            this.selected = selected;
+        }
+
+        /** Shown after the name, e.g. the grade's points ("-1"). */
+        public void setDetail(String detail) {
+            this.detail = detail;
+        }
+
+        @Override
+        public void onClick(MouseButtonEvent event, boolean doubleClick) {
+            onSelect.accept(index + 1);
+        }
+
+        @Override
+        public boolean keyPressed(KeyEvent event) {
+            if (isFocused() && (event.key() == InputConstants.KEY_SPACE || event.key() == InputConstants.KEY_RETURN)) {
+                playDownSound(Minecraft.getInstance().getSoundManager());
+                onSelect.accept(index + 1);
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public void extractWidgetRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+            Identifier sprite = !selected ? (isHoveredOrFocused() ? BUTTON_HOVERED : BUTTON_LOCKED) : BUTTON;
+            graphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, getX(), getY(), getWidth(), getHeight());
+            Font font = Minecraft.getInstance().font;
+            int color = COLORS[index];
+            String label = NAMES[index] + (detail.isEmpty() ? "" : " " + detail);
+            int textColor = selected ? color : (0xA0 << 24) | (color & 0x00FFFFFF);
+            graphics.text(font, label, getX() + (getWidth() - font.width(label)) / 2, getY() + (getHeight() - 8) / 2, textColor, true);
+            int stripAlpha = selected ? 0xE0 : 0x40;
+            graphics.fill(getX() + 1, getBottom() + 1, getRight() - 1, getBottom() + 3, (stripAlpha << 24) | (color & 0x00FFFFFF));
+        }
+
+        @Override
+        protected void updateWidgetNarration(NarrationElementOutput output) {
+            output.add(NarratedElementType.TITLE, Component.literal(NAMES[index] + " tab" + (selected ? ", selected" : "")));
+        }
     }
 }

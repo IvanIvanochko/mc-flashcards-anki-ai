@@ -13,11 +13,12 @@ import java.util.List;
  * @param answerForAi   the answer as plain text with formulas as LaTeX, for the grading AI
  * @param questionParts the question's text and pictures in the order they appear on the card
  * @param answerParts   the same for the answer
+ * @param lastReviewMillis when the card was last reviewed (before now), or -1 if never / unknown
  */
 public record AnkiCard(long cardId, String deckName, String question, String answer,
                        List<Integer> buttons, List<String> nextReviews,
                        String questionForAi, String answerForAi,
-                       List<Part> questionParts, List<Part> answerParts) {
+                       List<Part> questionParts, List<Part> answerParts, long lastReviewMillis) {
 
     /**
      * A run of text, or one picture; exactly one of the two is set.

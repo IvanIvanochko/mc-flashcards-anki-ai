@@ -110,6 +110,24 @@ public final class AnkiConnect {
         return null;
     }
 
+    /**
+     * When the card was last reviewed (from Anki's review log), for the rewards' "last seen" multiplier.
+     * @return epoch milliseconds, or -1 if the card has never been reviewed
+     */
+    public long lastReviewMillis(long cardId) throws AnkiException {
+        JsonElement result = invoke("getReviewsOfCards", Map.of("cards", List.of(String.valueOf(cardId))), Duration.ofSeconds(10));
+        if (result == null || !result.isJsonObject()) return -1;
+        long latest = -1;
+        for (Map.Entry<String, JsonElement> entry : result.getAsJsonObject().entrySet()) {
+            if (!entry.getValue().isJsonArray()) continue;
+            for (JsonElement review : entry.getValue().getAsJsonArray()) {
+                // each review's "id" is the time it happened, in epoch milliseconds
+                if (review.isJsonObject() && review.getAsJsonObject().has("id")) latest = Math.max(latest, review.getAsJsonObject().get("id").getAsLong());
+            }
+        }
+        return latest;
+    }
+
     /** One card's rendered sides, as HTML. */
     public record CardSides(String questionHtml, String answerHtml) {}
 

@@ -1,6 +1,7 @@
 package io.github.dennisochulor.flashcards.config;
 
 import io.github.dennisochulor.flashcards.ai.GradingPrompt;
+import io.github.dennisochulor.flashcards.progress.Progression;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
@@ -16,10 +17,11 @@ import java.util.List;
  * @param notes  the deck's notes for the grader, or ""
  * @param layout how big things are on this deck's cards
  * @param autoGrades which grades are applied on their own when this deck's card is graded while playing
+ * @param progression the rewards & penalties (score system) for this deck: its own, its nearest parent's, or the main one
+ * @param progressionFrom the deck whose setup that is, or null for the main setup
  */
-public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> correctCommands, List<String> wrongCommands,
-                           ModConfig.CommandSelectionStrategy strategy, int intervalSeconds, String notes, ModConfig.CardLayout layout,
-                           ModConfig.AutoGrades autoGrades) {
+public record DeckSettings(ModConfig.AiGrading ai, String prompt, int intervalSeconds, String notes, ModConfig.CardLayout layout,
+                           ModConfig.AutoGrades autoGrades, Progression.Setup progression, @Nullable String progressionFrom) {
 
     /** The complete instructions the grading AI gets for a card from this deck. */
     public String systemPrompt() {
@@ -30,9 +32,8 @@ public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> c
     public static DeckSettings forDeck(ModConfig config, @Nullable String deck) {
         ModConfig.AiGrading ai = config.aiGrading();
         String prompt = ai.prompt();
-        List<String> correct = config.correctAnswerCommands();
-        List<String> wrong = config.wrongAnswerCommands();
-        ModConfig.CommandSelectionStrategy strategy = config.commandSelectionStrategy();
+        Progression.Setup progression = config.progression();
+        String progressionFrom = null;
 
         int interval = config.intervalTotalSeconds();
 
@@ -53,10 +54,10 @@ public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> c
                     prompt = profile.prompt();
                     promptSet = true;
                 }
-                if (!rewardsSet && profile.customRewards()) {
-                    correct = profile.correctCommands();
-                    wrong = profile.wrongCommands();
-                    strategy = profile.strategy();
+                Progression.Setup ownSetup = profile.progression();
+                if (!rewardsSet && ownSetup != null) {
+                    progression = ownSetup;
+                    progressionFrom = name;
                     rewardsSet = true;
                 }
                 ModConfig.AutoGrades ownAuto = profile.autoGrades();
@@ -81,7 +82,7 @@ public record DeckSettings(ModConfig.AiGrading ai, String prompt, List<String> c
             int parentEnd = name.lastIndexOf("::");
             name = parentEnd < 0 ? "" : name.substring(0, parentEnd);
         }
-        return new DeckSettings(ai, prompt, correct, wrong, strategy, interval, notes, layout, autoGrades);
+        return new DeckSettings(ai, prompt, interval, notes, layout, autoGrades, progression, progressionFrom);
     }
 
     /** @return the profile saved for exactly this deck, or null */

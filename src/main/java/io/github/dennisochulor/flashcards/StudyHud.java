@@ -2,7 +2,11 @@ package io.github.dennisochulor.flashcards;
 
 import io.github.dennisochulor.flashcards.anki.AnkiSession;
 import io.github.dennisochulor.flashcards.anki.StudyStats;
+import io.github.dennisochulor.flashcards.config.DeckSettings;
 import io.github.dennisochulor.flashcards.config.ModConfig;
+import io.github.dennisochulor.flashcards.progress.ProgressStore;
+import io.github.dennisochulor.flashcards.progress.Progression;
+import io.github.dennisochulor.flashcards.questions.AnswerOutcome;
 import io.github.dennisochulor.flashcards.questions.AnkiQuestionScreen;
 import io.github.dennisochulor.flashcards.questions.QuestionScheduler;
 import io.github.dennisochulor.flashcards.questions.ThinkingAnimation;
@@ -209,10 +213,14 @@ public final class StudyHud {
         key = key * 31 + StudyStats.sessionWrong();
         String waiting = QuestionScheduler.waitingReason(minecraft);
         key = key * 31 + (waiting == null ? 0 : waiting.hashCode());
+        String scoreDeck = scoreDeck(config);
+        Progression.DeckState scoreState = ProgressStore.get(AnswerOutcome.scoreKey(scoreDeck));
+        key = key * 31 + scoreDeck.hashCode();
+        key = key * 31 + Long.hashCode(scoreState.lastUpdateMillis());
         Panel cached = panel;
         if (cached != null && key == panelKey && config == panelConfig && anki == panelAnki) return cached;
 
-        Panel built = build(minecraft.font, config, state, seconds, paused, grading, graded, anki, waiting);
+        Panel built = build(minecraft.font, config, state, seconds, paused, grading, graded, anki, waiting, scoreDeck);
         panel = built;
         panelKey = key;
         panelConfig = config;
@@ -221,7 +229,8 @@ public final class StudyHud {
     }
 
     private static Panel build(Font font, ModConfig config, QuestionScheduler.State state, long seconds, boolean paused,
-                               boolean grading, boolean graded, StudyStats.@Nullable AnkiStats anki, @Nullable String waiting) {
+                               boolean grading, boolean graded, StudyStats.@Nullable AnkiStats anki, @Nullable String waiting,
+                               String scoreDeck) {
         Component title;
         Component value;
         int accent;
@@ -308,12 +317,41 @@ public final class StudyHud {
             }
         }
 
+        if (detail != ModConfig.HudDetail.TIMER && config.scoreDisplay().hud()) {
+            Row score = scoreRow(config, scoreDeck);
+            if (score != null) rows.add(score);
+        }
+
         int inner = Math.max(MIN_INNER_WIDTH, font.width(title) + COLUMN_GAP + font.width(value));
         for (Row row : rows) inner = Math.max(inner, font.width(row.label()) + COLUMN_GAP + font.width(row.value()));
         int width = ACCENT_WIDTH + PAD + inner + PAD;
         int rowsHeight = rows.isEmpty() ? 0 : 4 + rows.size() * ROW_HEIGHT - (ROW_HEIGHT - font.lineHeight);
         int height = (PAD - 1) + font.lineHeight + 2 + 2 + rowsHeight + PAD - 1;
         return new Panel(title, value, accent, showBar, List.copyOf(rows), width, height);
+    }
+
+    /** The deck whose score the panel shows: the one last answered, else the deck picked in Anki Sync (or your own questions). */
+    private static String scoreDeck(ModConfig config) {
+        if (!AnkiSession.isEnabled()) return ProgressStore.OWN_QUESTIONS;
+        String last = ProgressStore.lastDeck();
+        if (last != null && !last.equals(ProgressStore.OWN_QUESTIONS)) return last;
+        return config.ankiDeck().isBlank() ? ProgressStore.OWN_QUESTIONS : config.ankiDeck();
+    }
+
+    /**
+     * "Score  -4 · Again: Weakened": the deck's score, and the named rules another Again would set off (the thing to avoid).
+     * Hidden while the deck has no rules and was never scored.
+     */
+    private static @Nullable Row scoreRow(ModConfig config, String deck) {
+        String key = AnswerOutcome.scoreKey(deck);
+        Progression.Setup setup = DeckSettings.forDeck(config, key.equals(ProgressStore.OWN_QUESTIONS) ? null : deck).progression();
+        if (!setup.hasRules() && ProgressStore.get(key).lastUpdateMillis() == 0) return null;
+        Progression.Result again = AnswerOutcome.preview(1, key.equals(ProgressStore.OWN_QUESTIONS) ? null : deck, -1);
+        double score = again.before();
+        MutableComponent value = Component.literal(Progression.formatScore(score)).withColor(score < 0 ? RED : score > 0 ? GREEN : CommonColors.WHITE);
+        List<String> names = again.fired().stream().map(Progression.Fired::name).filter(n -> !n.isBlank()).toList();
+        if (!names.isEmpty()) value.append(Component.literal("  Again: " + String.join(", ", names)).withColor(DIM));
+        return new Row(Component.literal("Score").withColor(GRAY), value);
     }
 
     /** m:ss, or h:mm:ss for long intervals. */

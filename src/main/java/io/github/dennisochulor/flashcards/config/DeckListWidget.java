@@ -30,7 +30,7 @@ class DeckListWidget extends ObjectSelectionList<DeckListWidget.Entry> {
     private static final int MARK_COLOR = 0xFF6EA8FF;
 
     /** Compares deck paths segment by segment so children always follow their parent ("A", "A::x", "A 2"). */
-    private static final Comparator<String> TREE_ORDER = (a, b) -> {
+    static final Comparator<String> TREE_ORDER = (a, b) -> {
         String[] pa = a.split("::");
         String[] pb = b.split("::");
         for (int i = 0; i < Math.min(pa.length, pb.length); i++) {
